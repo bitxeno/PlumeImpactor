@@ -69,7 +69,7 @@ impl MobileProvision {
         }
     }
     
-    pub fn merge_entitlements(&mut self, binary_path: PathBuf) -> Result<(), Error> {
+    pub fn merge_entitlements(&mut self, binary_path: PathBuf, team_id: &Option<String>) -> Result<(), Error> {
         let macho = MachO::new(&binary_path)?;
         let binary_entitlements = macho.entitlements.ok_or(Error::ProvisioningEntitlementsUnknown)?;
         
@@ -85,8 +85,7 @@ impl MobileProvision {
             .get("com.apple.developer.team-identifier")
             .and_then(Value::as_string)
             .map(|s| s.to_owned())
-            .or(Some("AAAAA11111".to_string())); 
-        // TODO: ^^ not hardcode livecontainers placeholder team identifier
+            .or(team_id.clone());
 
         if let (Some(new_id), Some(old_id)) = (new_team_id.as_ref(), old_team_id.as_ref()) {
             if let Some(Value::Array(groups)) = self.entitlements.get_mut("keychain-access-groups") {

@@ -219,8 +219,15 @@ impl Signer {
     pub async fn sign_bundle(&self, bundle: &Bundle) -> Result<(), Error> {
         let bundles = bundle.collect_bundles_sorted()?;
 
+        let team_id = bundle.get_team_identifier();
+
         for bundle in &bundles {
-            Self::sign_single_bundle(bundle, self.certificate.as_ref(), &self.provisioning_files)?;
+            Self::sign_single_bundle(
+                bundle, 
+                self.certificate.as_ref(), 
+                &self.provisioning_files, 
+                &team_id,
+            )?;
         }
 
         if let Some(cert) = &self.certificate {
@@ -236,7 +243,9 @@ impl Signer {
         bundle: &Bundle,
         certificate: Option<&CertificateIdentity>,
         provisioning_files: &[MobileProvision],
+        team_id: &Option<String>,
     ) -> Result<(), Error> {
+
         let mut settings = Self::build_base_settings(certificate)?;
 
         let mut entitlements_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -271,7 +280,7 @@ impl Signer {
 
                 if let Some(bundle_executable) = bundle.get_executable() {
                     let binary_path = bundle.bundle_dir().join(bundle_executable);
-                    prov.merge_entitlements(binary_path).ok();
+                    prov.merge_entitlements(binary_path, team_id).ok();
                 }
 
                 std::fs::write(
@@ -303,6 +312,7 @@ impl Signer {
         }
 
         settings.set_for_notarization(false);
+        // TODO: look into shallow options
         settings.set_shallow(false);
 
         Ok(settings)

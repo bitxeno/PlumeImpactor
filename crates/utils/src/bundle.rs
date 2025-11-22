@@ -2,6 +2,7 @@ use std::{
     fs, 
     path::PathBuf
 };
+use grand_slam::MachO;
 use plist::Value;
 use super::PlistInfoTrait;
 use crate::Error;
@@ -129,6 +130,18 @@ impl Bundle {
         }
 
         Ok(())
+    }
+
+    pub fn get_team_identifier(&self) -> Option<String> {
+        let executable_name = self.get_executable()?;
+        let executable_path = self.dir.join(&executable_name);
+
+        let macho = MachO::new(&executable_path).ok()?;
+        let entitlements = macho.entitlements?;
+
+        entitlements.get("com.apple.developer.team-identifier")
+            .and_then(|v| v.as_string())
+            .map(|s| s.to_string())
     }
 }
 
