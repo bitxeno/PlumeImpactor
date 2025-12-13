@@ -11,23 +11,44 @@ Open-source, cross-platform, and feature rich iOS sideloading application. Suppo
 
 [^2]: On Windows, [iTunes](https://support.apple.com/en-us/106372) must be downloaded so Impactor is able to use the drivers for interacting with Apple devices.
 
-| ![Demo of app](demo.webp)   |
-| :----------------------:    |
-| Demo of sideloading a working [LiveContainer](https://github.com/LiveContainer/LiveContainer) build. |
+| ![Demo of app](demo.png)                                                                            |
+| :--------------------------------------------------------------------------------------------------: |
+| Screenshot of Impactor after importing [Feather](https://github.com/khcrysalis/Feather). |
 
 ### Features
 
 - User friendly and clean UI.
 - Supports Linux.
 - Sign and sideload applications on iOS 9.0+ & Mac with your Apple ID.
+  - Installing with AppSync is supported.
+  - Installing with ipatool gotten ipa's is supported.
+    - Automatically disables updates from the App Store.
 - Simple customization options for the app.
+- Tweak support for advanced users, using [ElleKit](https://github.com/tealbathingsuit/ellekit) for injection.
+  - Supports injecting `.deb` and `.dylib` files.
+  - Supports adding `.framework`, `.bundle`, and `.appex` directories.
 - Generates P12 for SideStore/AltStore to use, similar to how Altserver works.
-- Automatically populate pairing files for specific apps like SideStore, Antrag, and Protokolle.
-- Almost *Proper* entitlement handling and can register app plugins.
+- Automatically populate pairing files for apps like SideStore, Antrag, and Protokolle.
+- Almost *proper* entitlement handling and can register app plugins.
+  - Able to request entitlements like `increased-memory-limit`, for emulators like MelonX or UTM.
 
 ## Download
 
 Visit [releases](https://github.com/khcrysalis/PlumeImpactor/releases) and get the latest version for your computer.
+
+## How it works
+
+How it works is that we try to replicate what [Xcode](https://developer.apple.com/xcode/) would do but in our own application, by using your Apple Account (which serves the purpose of being a "Developer") so we can request certificates, provisioning profiles, and register your device from Apple themselves. 
+
+Apple here is the provider of these and how we'll even be able to get apps on your phone. Unfortunately, without paying for their developer program you are limited to 7-days and a limited amount of apps/components you can register.
+
+The very first thing we do when trying to sideload an app, is register your idevice to their servers, then try to create a certificate. These last 365 days, we also store the key locally so you would need to copy these keys over to other machines, if you don't, Impactor will try to make a new one.
+
+After that, we try to register your app that you're trying to sideload, and try to provision it with proper entitlements gathered from the binary. Once we do, we have to download the neccessary files when signing, that being the certificate and provisioning profile that we just created.
+
+Lastly, we do all of the necessary modifications we need to the app you're trying to sideload, can range between tweaks, name changing, etc. Though most importantly, we need to *sign* the app using [apple-codesign-rs](https://github.com/indygreg/apple-platform-rs) so we can **install it** with [idevice](https://github.com/jkcoxson/idevice)!
+
+That's the entire gist of how this works! Of course its very short and brief, however feel free to look how it works since its open source :D
 
 ## Structure
 
@@ -37,11 +58,49 @@ The project is seperated in multiple modules, all serve single or multiple uses 
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `apps/plumeimpactor` | GUI interface for the crates shown below, backend using wxWidgets (with a rust ffi wrapper, wxDragon).                        |
 | `apps/plumesign`     | Simple CLI interface for signing, using `clap`.                                                                               |
-| `apps/udid`          | libMobileGestalt.dylib wrapper for obtaining Macs udid.                                                                       |
 | `crates/core`.       | Handles all api request used for communicating with Apple developer services, along with providing auth for Apple's grandslam |
+| `crates/gestalt`     | Wrapper for `libMobileGestalt.dylib`, used for obtaining your Mac's UDID for Apple Silicon sideloading.                       |
 | `crates/utils`       | Shared code between GUI and CLI, contains signing and modification logic, and helpers.                                        |
+| `crates/shared`      | Shared code between GUI and CLI, contains keychain functionality and shared datapaths.                                        |
 
-###### See how to compile & contribute to Impactor [here](./CONTRIBUTING.md).
+## Building
+
+Building is going to be a bit convoluted for each platform, each having their own unique specifications, but the best reference for building should be looking at how [GitHub actions](./.github/workflows/build.yml) does it.
+
+
+You need:
+- [Rust](https://rustup.rs/).
+- [CMake](https://cmake.org/download/) (and a c++ compiler).
+
+```sh
+# Applies our patches in ./patches 
+cargo install patch-crate
+cargo patch-crate --force && cargo fetch --locked
+
+# Building / testing
+cargo run --bin plumeimpactor
+```
+
+Extra requirements are shown below for building if you don't have these already, and trust me, it is convoluted.
+
+#### Linux Requirements
+
+```sh
+# Ubuntu/Debian
+sudo apt-get install libclang-dev pkg-config libgtk-3-dev libpng-dev libjpeg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev libexpat1-dev libtiff-dev
+
+# Fedora/RHEL
+sudo dnf install clang-devel pkg-config gtk3-devel libpng-devel libjpeg-devel mesa-libGL-devel mesa-libGLU-devel libxkbcommon-devel expat-devel libtiff-devel
+```
+
+#### macOS Requirements
+
+- [Xcode](https://developer.apple.com/xcode/) or [Command Line Tools](https://developer.apple.com/download/all/).
+
+#### Windows Requirements
+
+- [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022).
+- Windows 10/11 SDK.
 
 ## Sponsors
 
@@ -54,8 +113,11 @@ The project is seperated in multiple modules, all serve single or multiple uses 
 
 - [SAMSAM](https://github.com/khcrysalis) – The maker.
 - [SideStore](https://github.com/SideStore/apple-private-apis) – Grandslam auth & Omnisette.
+- [gms.py](https://gist.github.com/JJTech0130/049716196f5f1751b8944d93e73d3452) – Grandslam auth API references.
 - [Sideloader](https://github.com/Dadoum/Sideloader) – Apple Developer API references.
+- [PyDunk](https://github.com/nythepegasus/PyDunk) – `v1` Apple Developer API references.
 - [idevice](https://github.com/jkcoxson/idevice) – Used for communication with `installd`, specifically for sideloading the apps to your devices.
+- [apple-codesign-rs](https://github.com/indygreg/apple-platform-rs) – Codesign alternative, modified and extended upon to work for Impactor.
 
 ## License
 
