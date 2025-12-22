@@ -2143,7 +2143,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "idevice"
 version = "0.1.50"
-source = "git+https://github.com/jkcoxson/idevice?rev=d8bff83#d8bff83753737d8f6c80c9b1905f6d894c08fd41"
+source = "git+https://github.com/PlumeImpactor/plume-idevice?rev=5e350a#5e350ab4eaac8a18aa65bfd3893604575d4ce865"
 dependencies = [
  "async-stream",
  "async_zip",
