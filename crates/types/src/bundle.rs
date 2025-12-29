@@ -194,7 +194,8 @@ fn collect_embeded_bundles_from_dir(dir: &PathBuf) -> Result<Vec<Bundle>, Error>
 
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             // Handle dylib files as bundles (even though they don't have Info.plist)
-            if path.is_file() && is_dylib_file(name) && !path.is_symlink() {
+            if path.is_file() && is_dylib_file(name) && !path.is_symlink() && is_macho_dylib(&path)
+            {
                 // Create a pseudo-bundle for dylib files
                 bundles.push(Bundle {
                     bundle_dir: path,
@@ -226,6 +227,26 @@ fn collect_embeded_bundles_from_dir(dir: &PathBuf) -> Result<Vec<Bundle>, Error>
     }
 
     Ok(bundles)
+}
+
+fn is_macho_dylib(path: &std::path::Path) -> bool {
+    use std::fs::File;
+    use std::io::Read;
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut magic = [0u8; 4];
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+
+    matches!(
+        u32::from_be_bytes(magic),
+        0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcafebabf
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
