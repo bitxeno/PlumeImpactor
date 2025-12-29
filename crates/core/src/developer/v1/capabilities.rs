@@ -8,8 +8,17 @@ use crate::developer_endpoint;
 use crate::Error;
 use std::collections::HashSet;
 
-const FREE_DEVELOPER_ACCOUNT_UNALLOWED_CAPABILITIES: &[&str] =
-    &["AUTOFILL_CREDENTIAL_PROVIDER", "APPLE_ID_AUTH"];
+const FREE_DEVELOPER_ACCOUNT_UNALLOWED_CAPABILITIES: &[&str] = &[
+    "AUTOFILL_CREDENTIAL_PROVIDER",
+    "APPLE_ID_AUTH",
+    "NETWORK_SLICING",
+    "MERCHANT_ACCESSIBILITY_CONTROL",
+    "ICLOUD",
+    "ICLOUD_EXTENDED_SHARE_ACCESS",
+    "IN_APP_PURCHASE",
+    "JOURNALING_SUGGESTIONS",
+    "MDM_MANAGED_ASSOCIATED_DOMAINS",
+];
 
 impl DeveloperSession {
     pub async fn v1_list_capabilities(&self, team: &String) -> Result<CapabilitiesResponse, Error> {

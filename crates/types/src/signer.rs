@@ -280,7 +280,7 @@ impl Signer {
 "#.to_string();
 
         for bundle in &bundles {
-            log::debug!("Signing bundle: {}", bundle.bundle_dir().display());
+            log::info!("Signing bundle: {}", bundle.bundle_dir().display());
             Self::sign_single_bundle(
                 self,
                 bundle,
@@ -372,8 +372,7 @@ impl Signer {
         }
 
         settings.set_for_notarization(false);
-        // TODO: look into shallow options
-        settings.set_shallow(false);
+        settings.set_shallow(true);
 
         Ok(settings)
     }
