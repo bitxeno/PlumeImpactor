@@ -194,7 +194,7 @@ fn collect_embeded_bundles_from_dir(dir: &PathBuf) -> Result<Vec<Bundle>, Error>
 
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             // Handle dylib files as bundles (even though they don't have Info.plist)
-            if path.is_file() && is_dylib_file(name) {
+            if path.is_file() && is_dylib_file(name) && !path.is_symlink() {
                 // Create a pseudo-bundle for dylib files
                 bundles.push(Bundle {
                     bundle_dir: path,
