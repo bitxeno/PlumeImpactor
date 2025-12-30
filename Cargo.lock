@@ -1677,7 +1677,7 @@ dependencies = [
 
 [[package]]
 name = "gestalt"
-version = "1.3.0"
+version = "1.4.0"
 
 [[package]]
 name = "getrandom"
@@ -3099,7 +3099,7 @@ dependencies = [
 
 [[package]]
 name = "plume_core"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -3135,11 +3135,11 @@ dependencies = [
 
 [[package]]
 name = "plume_shared"
-version = "1.3.0"
+version = "1.4.0"
 
 [[package]]
 name = "plume_utils"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "decompress",
  "futures",
@@ -3156,7 +3156,7 @@ dependencies = [
 
 [[package]]
 name = "plumeimpactor"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "embed-manifest",
  "env_logger",
@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "plumesign"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "clap",
