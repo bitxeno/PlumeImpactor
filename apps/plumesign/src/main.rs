@@ -5,7 +5,13 @@ use commands::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    let default_level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level))
+        .init();
     let cli = Cli::parse();
 
     match cli.command {
