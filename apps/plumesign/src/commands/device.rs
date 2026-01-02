@@ -8,7 +8,7 @@ use idevice::{
     installation_proxy::InstallationProxyClient,
     usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
 };
-use plume_utils::{Device, get_device_for_id};
+use plume_utils::{Device, get_device_for_uuid};
 
 #[derive(Debug, Args)]
 #[command(arg_required_else_help = true)]
@@ -105,7 +105,7 @@ pub async fn execute(args: DeviceArgs) -> Result<()> {
 
 pub async fn select_device(device_udid: Option<String>) -> Result<Device> {
     if let Some(udid) = device_udid {
-        return Ok(get_device_for_id(&udid).await?);
+        return Ok(get_device_for_uuid(&udid).await?);
     }
 
     let mut muxer = UsbmuxdConnection::default().await?;

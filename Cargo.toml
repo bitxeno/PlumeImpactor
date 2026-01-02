@@ -32,7 +32,7 @@ repository = "https://github.com/khcrysalis/plumestore"
 [workspace.dependencies]
 tokio = { version = "1.43", features = ["full"] }
 # Application
-idevice = { git = "https://github.com/PlumeImpactor/plume-idevice", rev = "5e350a", features = [
+idevice = { git = "https://github.com/bitxeno/idevice", branch = "wireless_pairing", features = [
     "afc",
     "installation_proxy",
     "debug_proxy",
@@ -42,6 +42,7 @@ idevice = { git = "https://github.com/PlumeImpactor/plume-idevice", rev = "5e350
     "usbmuxd",
     "house_arrest",
     "pair",
+    "tcp",
 ] }
 plist = "1.8.0"
 

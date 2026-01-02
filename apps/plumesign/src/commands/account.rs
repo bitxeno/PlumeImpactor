@@ -26,7 +26,7 @@ pub enum AccountCommands {
     /// Login to Apple Developer account
     Login(LoginArgs),
     /// Logout from Apple Developer account
-    Logout,
+    Logout(LogoutArgs),
     /// List all saved accounts
     List,
     /// Switch to a different account
@@ -39,6 +39,15 @@ pub enum AccountCommands {
     RegisterDevice(RegisterDeviceArgs),
     /// List all app IDs for a team
     AppIds(AppIdsArgs),
+    /// List teams for the authenticated account
+    Teams(TeamsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TeamsArgs {
+    /// Email of the account to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -53,7 +62,17 @@ pub struct LoginArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct LogoutArgs {
+    /// Email of the account to logout
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub struct CertificatesArgs {
+    /// Email of the account to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
     /// Team ID to list certificates for
     #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
     pub team_id: Option<String>,
@@ -102,13 +121,14 @@ pub struct SwitchArgs {
 pub async fn execute(args: AccountArgs) -> Result<()> {
     match args.command {
         AccountCommands::Login(login_args) => login(login_args).await,
-        AccountCommands::Logout => logout().await,
+        AccountCommands::Logout(logout_args) => logout(logout_args).await,
         AccountCommands::List => list_accounts().await,
         AccountCommands::Switch(switch_args) => switch_account(switch_args).await,
         AccountCommands::Certificates(cert_args) => certificates(cert_args).await,
         AccountCommands::Devices(device_args) => devices(device_args).await,
         AccountCommands::RegisterDevice(register_args) => register_device(register_args).await,
         AccountCommands::AppIds(app_id_args) => app_ids(app_id_args).await,
+        AccountCommands::Teams(teams_args) => list_teams_command(teams_args).await,
     }
 }
 
@@ -116,18 +136,28 @@ fn get_settings_path() -> PathBuf {
     get_data_path().join("accounts.json")
 }
 
-pub async fn get_authenticated_account() -> Result<DeveloperSession> {
+pub async fn get_authenticated_account(username: Option<String>) -> Result<DeveloperSession> {
     let settings_path = get_settings_path();
     let settings = AccountStore::load(&Some(settings_path.clone())).await?;
 
-    let gsa_account = settings
-        .selected_account()
-        .ok_or_else(|| {
+    let gsa_account = if let Some(user) = username {
+        settings.get_account(&user).ok_or_else(|| {
             anyhow::anyhow!(
-                "No account selected. Please login first using 'plumesign account login'"
+                "Account '{}' not found. Use 'plumesign account list' to see available accounts.",
+                user
             )
         })?
-        .clone();
+        .clone()
+    } else {
+        settings
+            .selected_account()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No account selected. Please login first using 'plumesign account login'"
+                )
+            })?
+            .clone()
+    };
 
     if *gsa_account.status() == AccountStatus::NeedsReauth {
         return Err(anyhow::anyhow!(
@@ -160,7 +190,6 @@ async fn login(args: LoginArgs) -> Result<()> {
     };
 
     let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
-
     let username = if let Some(user) = args.username {
         user
     } else {
@@ -199,15 +228,25 @@ async fn login(args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
-async fn logout() -> Result<()> {
+async fn logout(args: LogoutArgs) -> Result<()> {
     let settings_path = get_settings_path();
     let mut settings = AccountStore::load(&Some(settings_path.clone())).await?;
 
-    let email = settings
-        .selected_account()
-        .ok_or_else(|| anyhow::anyhow!("No account currently logged in"))?
-        .email()
-        .clone();
+    let email = if let Some(user) = args.username {
+        if settings.get_account(&user).is_none() {
+            return Err(anyhow::anyhow!(
+                "Account '{}' not found. Use 'plumesign account list' to see available accounts.",
+                user
+            ));
+        }
+        user
+    } else {
+        settings
+            .selected_account()
+            .ok_or_else(|| anyhow::anyhow!("No account currently logged in"))?
+            .email()
+            .clone()
+    };
 
     settings.accounts_remove(&email).await?;
 
@@ -217,7 +256,7 @@ async fn logout() -> Result<()> {
 }
 
 async fn certificates(args: CertificatesArgs) -> Result<()> {
-    let session = get_authenticated_account().await?;
+    let session = get_authenticated_account(args.username).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
@@ -225,15 +264,24 @@ async fn certificates(args: CertificatesArgs) -> Result<()> {
         args.team_id.unwrap()
     };
 
-    let p = session.qh_list_certs(&team_id).await?.certificates;
+    let certificates = session.qh_list_certs(&team_id).await?.certificates;
 
-    log::info!("{:#?}", p);
+    log::info!("You have {} certificates registered.", certificates.len());
+    log::info!("Currently registered certificates:");
+    for cert in certificates.iter() {
+        log::info!(
+            " - `{}` with the serial number `{}`, from the machine named `{}`.",
+            cert.name,
+            cert.serial_number,
+            cert.machine_name.as_deref().unwrap_or("")
+        );
+    }
 
     Ok(())
 }
 
 async fn devices(args: DevicesArgs) -> Result<()> {
-    let session = get_authenticated_account().await?;
+    let session = get_authenticated_account(None).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
@@ -249,7 +297,7 @@ async fn devices(args: DevicesArgs) -> Result<()> {
 }
 
 async fn register_device(args: RegisterDeviceArgs) -> Result<()> {
-    let session = get_authenticated_account().await?;
+    let session = get_authenticated_account(None).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
@@ -285,7 +333,7 @@ pub async fn teams(session: &DeveloperSession) -> Result<String> {
 }
 
 pub async fn app_ids(args: AppIdsArgs) -> Result<()> {
-    let session = get_authenticated_account().await?;
+    let session = get_authenticated_account(None).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
@@ -296,6 +344,24 @@ pub async fn app_ids(args: AppIdsArgs) -> Result<()> {
     let p = session.v1_list_app_ids(&team_id).await?.data;
 
     log::info!("{:#?}", p);
+
+    Ok(())
+}
+
+async fn list_teams_command(args: TeamsArgs) -> Result<()> {
+    let session = get_authenticated_account(args.username).await?;
+
+    let teams = session.qh_list_teams().await?.teams;
+
+    if teams.is_empty() {
+        log::info!("No teams found for account.");
+        return Ok(());
+    }
+
+    log::info!("Teams:");
+    for t in teams.iter() {
+        log::info!(" - {} ({})", t.name, t.team_id);
+    }
 
     Ok(())
 }

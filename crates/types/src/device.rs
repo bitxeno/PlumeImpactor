@@ -237,6 +237,18 @@ impl fmt::Display for Device {
     }
 }
 
+pub async fn get_device_for_uuid(device_uuid: &str) -> Result<Device, Error> {
+    let mut usbmuxd = UsbmuxdConnection::default().await?;
+    let usbmuxd_device = usbmuxd
+        .get_devices()
+        .await?
+        .into_iter()
+        .find(|d| d.udid.to_string() == device_uuid)
+        .ok_or_else(|| Error::Other(format!("Device ID {device_uuid} not found")))?;
+
+    Ok(Device::new(usbmuxd_device).await)
+}
+
 pub async fn get_device_for_id(device_id: &str) -> Result<Device, Error> {
     let mut usbmuxd = UsbmuxdConnection::default().await?;
     let usbmuxd_device = usbmuxd

@@ -8,7 +8,7 @@ mod tweak;
 use std::path::Path;
 
 pub use bundle::{Bundle, BundleType}; // Bundle helper
-pub use device::{Device, get_device_for_id}; // Device helper
+pub use device::{Device, get_device_for_id, get_device_for_uuid}; // Device helper
 pub use options::{
     SignerApp,         // Supported app types
     SignerEmbedding,   // Embedding options
@@ -59,8 +59,10 @@ pub trait PlistInfoTrait {
     fn get_name(&self) -> Option<String>;
     fn get_executable(&self) -> Option<String>;
     fn get_bundle_identifier(&self) -> Option<String>;
+    fn get_bundle_name(&self) -> Option<String>;
     fn get_version(&self) -> Option<String>;
     fn get_build_version(&self) -> Option<String>;
+    fn get_platform_name(&self) -> Option<String>;
 }
 
 async fn copy_dir_recursively(src: &Path, dst: &Path) -> Result<(), Error> {

@@ -11,12 +11,21 @@ impl DeveloperSession {
         &self,
         team_id: &String,
         app_id_id: &String,
+        platform: Option<&String>,
     ) -> Result<ProfilesResponse, Error> {
         let endpoint = developer_endpoint!("/QH65B2/ios/downloadTeamProvisioningProfile.action");
 
         let mut body = Dictionary::new();
         body.insert("teamId".to_string(), Value::String(team_id.clone()));
         body.insert("appIdId".to_string(), Value::String(app_id_id.clone()));
+
+        if platform.map_or(false, |s| s.eq_ignore_ascii_case("appletvos")) {
+            body.insert(
+                "DTDK_Platform".to_string(),
+                Value::String("tvos".to_string()),
+            );
+            body.insert("subPlatform".to_string(), Value::String("tvOS".to_string()));
+        }
 
         let response = self.qh_send_request(&endpoint, Some(body)).await?;
         let response_data: ProfilesResponse = plist::from_value(&Value::Dictionary(response))?;

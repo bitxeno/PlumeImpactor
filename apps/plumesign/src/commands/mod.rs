@@ -1,8 +1,12 @@
 use clap::{Parser, Subcommand};
 
 pub mod account;
+pub mod certificate;
+pub mod check;
 pub mod device;
+pub mod device_id;
 pub mod macho;
+pub mod pair;
 pub mod sign;
 
 #[derive(Debug, Parser)]
@@ -27,6 +31,14 @@ pub enum Commands {
     MachO(macho::MachArgs),
     /// Manage Apple Developer account authentication
     Account(account::AccountArgs),
+    /// Certificate management (list / revoke)
+    Certificate(certificate::CertificateArgs),
     /// Device management commands
     Device(device::DeviceArgs),
+    /// List connected devices (udid, id, name)
+    DeviceId(device_id::DeviceIdArgs),
+    /// Pair a device (wired or wireless)
+    Pair(pair::PairArgs),
+    /// Check PublicStaging via AFC and list files
+    Check(check::CheckArgs),
 }

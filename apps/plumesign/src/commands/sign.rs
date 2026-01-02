@@ -24,6 +24,9 @@ pub struct SignArgs {
     /// Use Apple ID credentials for signing
     #[arg(long = "apple-id")]
     pub apple_id: bool,
+    /// Specify account email to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
     /// Provisioning profile files to embed
     #[arg(long = "provision", value_name = "PROVISION")]
     pub provisioning_files: Option<PathBuf>,
@@ -89,7 +92,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         options.mode = SignerMode::Pem;
         (Signer::new(Some(cert_identity), options), None)
     } else if args.apple_id {
-        let session = get_authenticated_account().await?;
+        let session = get_authenticated_account(args.username.clone()).await?;
         let team_id = teams(&session).await?;
         let cert_identity =
             CertificateIdentity::new_with_session(&session, get_data_path(), None, &team_id)

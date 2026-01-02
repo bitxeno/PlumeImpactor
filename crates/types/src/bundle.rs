@@ -80,6 +80,10 @@ impl Bundle {
         self.set_info_plist_key("CFBundleIdentifier", new_identifier)
     }
 
+    pub fn set_bundle_name(&self, new_name: &str) -> Result<(), Error> {
+        self.set_info_plist_key("CFBundleName", new_name)
+    }
+
     pub fn set_matching_identifier(
         &self,
         old_identifier: &str,
@@ -164,12 +168,20 @@ impl PlistInfoTrait for Bundle {
         get_plist_string!(self, "CFBundleIdentifier")
     }
 
+    fn get_bundle_name(&self) -> Option<String> {
+        get_plist_string!(self, "CFBundleName")
+    }
+
     fn get_version(&self) -> Option<String> {
         get_plist_string!(self, "CFBundleShortVersionString")
     }
 
     fn get_build_version(&self) -> Option<String> {
         get_plist_string!(self, "CFBundleVersion")
+    }
+
+    fn get_platform_name(&self) -> Option<String> {
+        get_plist_string!(self, "DTPlatformName")
     }
 }
 

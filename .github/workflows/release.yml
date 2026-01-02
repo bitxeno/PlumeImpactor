@@ -1,0 +1,71 @@
+name: "Release"
+on:
+  push:
+    tags: ["v*"]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "apps/**"
+      - "package/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+env:
+  BINARY_NAME: plumeimpactor
+  BINARY_NAME_CLI: plumesign
+  BUNDLE_NAME: Impactor
+
+jobs:
+  build-linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: snok/install-poetry@v1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install and cache apt pkgs
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: flatpak flatpak-builder libssl-dev pkg-config libglib2.0-dev libsecret-1-dev libgtk-3-dev libpng-dev libjpeg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev libexpat1-dev libtiff-dev
+          version: 1.0
+
+      - name: Build binaries
+        run: |
+          make linux PROFILE=release APPIMAGE=1
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-linux-${{ matrix.arch }}
+          path: dist/*
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: [build-linux]
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

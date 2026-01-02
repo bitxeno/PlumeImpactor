@@ -9,6 +9,7 @@ use plume_core::{
 };
 
 use crate::{Bundle, BundleType, Error, PlistInfoTrait, SignerApp, SignerMode, SignerOptions};
+use regex::Regex;
 
 pub struct Signer {
     certificate: Option<CertificateIdentity>,
@@ -40,8 +41,12 @@ impl Signer {
             .filter(|b| b.bundle_type().should_have_entitlements())
             .collect::<Vec<_>>();
 
+        let identifier = bundle.get_bundle_identifier();
+
         if let Some(new_name) = self.options.custom_name.as_ref() {
             bundle.set_name(new_name)?;
+        } else {
+            self.fix_bundle_name(bundle, &identifier)?;
         }
 
         if let Some(new_version) = self.options.custom_version.as_ref() {
@@ -69,11 +74,10 @@ impl Signer {
             bundle.set_info_plist_key("CADisableMinimumFrameDurationOnPhone", true)?;
         }
 
-        let identifier = bundle.get_bundle_identifier();
-
         if self.options.mode != SignerMode::Adhoc && self.options.custom_identifier.is_none() {
             if let (Some(identifier), Some(team_id)) = (identifier.as_ref(), team_id.as_ref()) {
-                self.options.custom_identifier = Some(format!("{identifier}.{team_id}"));
+                let clean_id = self.fix_bundle_identifier(identifier);
+                self.options.custom_identifier = Some(format!("{clean_id}.{team_id}"));
             }
         }
 
@@ -157,6 +161,7 @@ impl Signer {
             return Ok(());
         }
 
+        let platform = bundle.get_platform_name();
         let bundles = bundle
             .collect_bundles_sorted()?
             .into_iter()
@@ -174,6 +179,7 @@ impl Signer {
             let session = session_arc.clone();
             let team_id = team_id_arc.clone();
             let signer_settings = signer_settings.clone();
+            let platform = platform.clone();
 
             if signer_settings.embedding.single_profile
                 && sub_bundle.bundle_dir() != bundle.bundle_dir()
@@ -243,7 +249,7 @@ impl Signer {
                 }
 
                 let profiles = session
-                    .qh_get_profile(&team_id, &app_id_id.app_id_id)
+                    .qh_get_profile(&team_id, &app_id_id.app_id_id, platform.as_ref())
                     .await?;
                 let profile_data = profiles.provisioning_profile.encoded_profile;
 
@@ -375,5 +381,30 @@ impl Signer {
         settings.set_shallow(true);
 
         Ok(settings)
+    }
+
+    fn fix_bundle_name(&self, bundle: &Bundle, identifier: &Option<String>) -> Result<(), Error> {
+        let bundle_name = bundle.get_bundle_name();
+        let mut new_bundle_name = bundle_name.clone();
+        if new_bundle_name.is_none() {
+            if let Some(id) = identifier.clone() {
+                new_bundle_name = Some(id);
+            }
+        }
+
+        if let Some(name) = new_bundle_name.as_mut() {
+            let re = Regex::new(r"[^a-zA-Z0-9.-]").unwrap();
+            if re.is_match(name) {
+                *name = re.replace_all(name, "").to_string();
+            }
+            bundle.set_name(name)?;
+        }
+
+        Ok(())
+    }
+
+    fn fix_bundle_identifier(&self, identifier: &str) -> String {
+        let re = Regex::new(r"[^a-zA-Z0-9.-]").unwrap();
+        re.replace_all(identifier, "").to_string()
     }
 }

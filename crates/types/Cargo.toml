@@ -16,6 +16,7 @@ tokio.workspace = true
 futures.workspace = true
 log.workspace = true
 plume_core = { path = "../core" }
+regex = "1.11.2"
 
 # TODO: replace zip with decompress
 zip = { version = "4.3", default-features = false, features = ["deflate"] }

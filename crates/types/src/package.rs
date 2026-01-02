@@ -87,11 +87,11 @@ impl Package {
     }
 
     pub fn get_archive_based_on_path(&self, path: PathBuf) -> Result<PathBuf, Error> {
-        if path.is_dir() {
-            self.clone().archive_package_bundle()
-        } else {
-            Ok(self.package_file.clone())
-        }
+        // Always create an archive from the staged payload so the returned
+        // path points to the updated (resigned) IPA rather than the original
+        // copied `stage.ipa` which contains the unsigned contents.
+        let _ = path; // parameter kept for compatibility
+        self.clone().archive_package_bundle()
     }
 
     fn archive_package_bundle(self) -> Result<PathBuf, Error> {
@@ -166,12 +166,20 @@ impl PlistInfoTrait for Package {
         get_plist_dict_value!(self, "CFBundleIdentifier")
     }
 
+    fn get_bundle_name(&self) -> Option<String> {
+        get_plist_dict_value!(self, "CFBundleName")
+    }
+
     fn get_version(&self) -> Option<String> {
         get_plist_dict_value!(self, "CFBundleShortVersionString")
     }
 
     fn get_build_version(&self) -> Option<String> {
         get_plist_dict_value!(self, "CFBundleVersion")
+    }
+
+    fn get_platform_name(&self) -> Option<String> {
+        get_plist_dict_value!(self, "DTPlatformName")
     }
 }
 
