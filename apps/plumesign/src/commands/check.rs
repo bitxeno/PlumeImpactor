@@ -1,22 +1,82 @@
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 
 use idevice::IdeviceService;
 use idevice::afc::AfcClient;
-use idevice::usbmuxd::UsbmuxdAddr;
+use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
+use plume_core::AnisetteConfiguration;
+use plume_core::auth::anisette_data::AnisetteData;
+use plume_shared::get_data_path;
 
 use crate::commands::device::select_device;
+use plume_utils::Device;
 
 #[derive(Debug, Args)]
-#[command(about = "Check PublicStaging via AFC and list files")]
+#[command(
+    arg_required_else_help = true,
+    about = "Check PublicStaging via AFC and list files"
+)]
 pub struct CheckArgs {
+    #[command(subcommand)]
+    pub command: CheckCommands,
+}
+
+#[derive(Debug, Subcommand)]
+#[command(arg_required_else_help = true)]
+pub enum CheckCommands {
+    /// Show configuration path
+    Config,
+    /// Run AFC check and show result
+    Afc(AfcArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigArgs {}
+
+#[derive(Debug, Args)]
+pub struct AfcArgs {
     /// Device UDID to target (optional, will prompt if not provided)
     #[arg(short = 'u', long = "udid", value_name = "UDID")]
     pub udid: Option<String>,
 }
 
 pub async fn execute(args: CheckArgs) -> Result<()> {
-    let device = select_device(args.udid).await?;
+    match args.command {
+        CheckCommands::Config => config().await,
+        CheckCommands::Afc(afc_args) => afc(afc_args).await,
+    }
+}
+
+async fn config() -> Result<()> {
+    let config_path = get_data_path();
+    log::info!("configurationPath={}", config_path.display());
+
+    // anisette data auto save to ~/.config/PlumeImpactor/state.plist
+    let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
+    let anisette = AnisetteData::new(anisette_config).await?;
+    log::info!("anisette={:#?}", anisette);
+
+    Ok(())
+}
+
+async fn afc(args: AfcArgs) -> Result<()> {
+    let device: Device = if let Some(udid) = args.udid {
+        select_device(Some(udid)).await?
+    } else {
+        // No UDID provided: pick the first connected device automatically.
+        let mut muxer = UsbmuxdConnection::default().await?;
+        let usb_devices = muxer.get_devices().await?;
+
+        if usb_devices.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No devices connected. Please connect a device or specify a UDID with -u"
+            ));
+        }
+
+        let device_futures: Vec<_> = usb_devices.into_iter().map(|d| Device::new(d)).collect();
+        let devices = futures::future::join_all(device_futures).await;
+        devices[0].clone()
+    };
 
     let provider = device
         .usbmuxd_device
@@ -24,19 +84,15 @@ pub async fn execute(args: CheckArgs) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Device has no usbmuxd provider"))?
         .to_provider(UsbmuxdAddr::default(), "plume_check_afc");
 
-    // Try to connect to AFC service and list the PublicStaging directory.
-    // The exact AFC API surface may differ; this follows repository patterns.
     let mut afc = AfcClient::connect(&provider).await?;
 
     let dir = "PublicStaging";
 
-    // Query info for the PublicStaging directory itself
     match afc.get_file_info(dir).await {
         Ok(_) => {
-            return Ok(());
+            println!("AFC access OK");
+            Ok(())
         }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Failed to access afc service: {}", e));
-        }
+        Err(e) => Err(anyhow::anyhow!("Failed to access afc service: {}", e)),
     }
 }
