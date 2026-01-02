@@ -1,7 +1,6 @@
 name: "Release"
 on:
   push:
-    tags: ["v*"]
     paths:
       - "crates/**"
       - "Cargo.toml"
