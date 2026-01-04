@@ -41,6 +41,23 @@ impl DeveloperSession {
         Ok(response_data)
     }
 
+    pub async fn qh_delete_device(
+        &self,
+        team_id: &String,
+        device_id: &String,
+    ) -> Result<DeleteDeviceResponse, Error> {
+        let endpoint = developer_endpoint!("/QH65B2/ios/deleteDevice.action");
+
+        let mut body = Dictionary::new();
+        body.insert("teamId".to_string(), Value::String(team_id.clone()));
+        body.insert("deviceId".to_string(), Value::String(device_id.clone()));
+
+        let response = self.qh_send_request(&endpoint, Some(body)).await?;
+        let response_data: DeleteDeviceResponse = plist::from_value(&Value::Dictionary(response))?;
+
+        Ok(response_data)
+    }
+
     pub async fn qh_get_device(
         &self,
         team_id: &String,
@@ -87,6 +104,14 @@ pub struct DevicesResponse {
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
     pub device: Device,
+    #[serde(flatten)]
+    pub meta: QHResponseMeta,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteDeviceResponse {
     #[serde(flatten)]
     pub meta: QHResponseMeta,
 }

@@ -87,12 +87,8 @@ async fn afc(args: AfcArgs) -> Result<()> {
     let mut afc = AfcClient::connect(&provider).await?;
 
     let dir = "PublicStaging";
+    let _ = afc.get_file_info(dir).await?;
 
-    match afc.get_file_info(dir).await {
-        Ok(_) => {
-            println!("AFC access OK");
-            Ok(())
-        }
-        Err(e) => Err(anyhow::anyhow!("Failed to access afc service: {}", e)),
-    }
+    println!("SUCCESS: AFC access OK");
+    Ok(())
 }

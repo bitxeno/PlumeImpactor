@@ -37,6 +37,8 @@ pub enum AccountCommands {
     Devices(DevicesArgs),
     /// Register a new device
     RegisterDevice(RegisterDeviceArgs),
+    /// Delete a device from the account
+    DeleteDevice(DeleteDeviceArgs),
     /// List all app IDs for a team
     AppIds(AppIdsArgs),
     /// List teams for the authenticated account
@@ -105,6 +107,21 @@ pub struct RegisterDeviceArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct DeleteDeviceArgs {
+    /// Team ID to delete device from
+    #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
+    pub team_id: Option<String>,
+    /// Device Identifier
+    #[arg(
+        short = 'i',
+        long = "device-id",
+        value_name = "DEVICE_ID",
+        required = true
+    )]
+    pub device_id: String,
+}
+
+#[derive(Debug, Args)]
 pub struct AppIdsArgs {
     /// Team ID to list app IDs for
     #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
@@ -127,12 +144,13 @@ pub async fn execute(args: AccountArgs) -> Result<()> {
         AccountCommands::Certificates(cert_args) => certificates(cert_args).await,
         AccountCommands::Devices(device_args) => devices(device_args).await,
         AccountCommands::RegisterDevice(register_args) => register_device(register_args).await,
+        AccountCommands::DeleteDevice(delete_args) => delete_device(delete_args).await,
         AccountCommands::AppIds(app_id_args) => app_ids(app_id_args).await,
         AccountCommands::Teams(teams_args) => list_teams_command(teams_args).await,
     }
 }
 
-fn get_settings_path() -> PathBuf {
+pub fn get_settings_path() -> PathBuf {
     get_data_path().join("accounts.json")
 }
 
@@ -315,6 +333,25 @@ async fn register_device(args: RegisterDeviceArgs) -> Result<()> {
     Ok(())
 }
 
+async fn delete_device(args: DeleteDeviceArgs) -> Result<()> {
+    let session = get_authenticated_account(None).await?;
+
+    let team_id = if args.team_id.is_none() {
+        teams(&session).await?
+    } else {
+        args.team_id.unwrap()
+    };
+
+    session.qh_delete_device(&team_id, &args.device_id).await?;
+
+    log::info!(
+        "Successfully deleted device with Device ID: {}",
+        args.device_id
+    );
+
+    Ok(())
+}
+
 pub async fn teams(session: &DeveloperSession) -> Result<String> {
     let teams = session.qh_list_teams().await?.teams;
 
@@ -360,7 +397,7 @@ async fn list_teams_command(args: TeamsArgs) -> Result<()> {
 
     log::info!("Teams:");
     for t in teams.iter() {
-        log::info!(" - {} ({})", t.name, t.team_id);
+        log::info!(" - `{}`, with ID `{}`.", t.name, t.team_id);
     }
 
     Ok(())
