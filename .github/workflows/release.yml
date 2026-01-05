@@ -56,12 +56,14 @@ jobs:
           path: dist
 
       - name: Compress build files
-        run: cd ./dist && for i in *; do tar -czf $i.tar.gz $i; done
+        run: |
+          cd ./dist
+          for dir in */; do (cd "$dir" && for file in *; do tar -czf "../${dir%/}-${file}.tar.gz" "$file"; done); done
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.tar.gz
+          files: dist/**/*.tar.gz
           generate_release_notes: true
           prerelease: true
         env:
