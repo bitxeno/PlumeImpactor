@@ -677,6 +677,7 @@ impl PlumeFrame {
                                     .map_err(|e| format!("Failed to sign bundle: {}", e))?;
 
                                 package_file = bundle.bundle_dir().to_path_buf();
+                                signer_settings = signer.options;
                             }
                             SignerMode::Adhoc => {
                                 let mut signer = Signer::new(None, signer_settings.clone());
@@ -710,6 +711,7 @@ impl PlumeFrame {
                                     .map_err(|e| format!("Failed to sign bundle: {}", e))?;
 
                                 package_file = bundle.bundle_dir().to_path_buf();
+                                signer_settings = signer.options;
                             }
                             _ => {
                                 let bundle = package
