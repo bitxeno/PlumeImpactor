@@ -85,6 +85,9 @@ pub struct CertificatesArgs {
 
 #[derive(Debug, Args)]
 pub struct DevicesArgs {
+    /// Email of the account to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
     /// Team ID to list devices for
     #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
     pub team_id: Option<String>,
@@ -95,11 +98,14 @@ pub struct DevicesArgs {
 
 #[derive(Debug, Args)]
 pub struct RegisterDeviceArgs {
+    /// Email of the account to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
     /// Team ID to list devices for
     #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
     pub team_id: Option<String>,
     /// Device UDID
-    #[arg(short = 'u', long = "udid", value_name = "UDID", required = true)]
+    #[arg(long = "udid", value_name = "UDID", required = true)]
     pub udid: String,
     /// Device name
     #[arg(short = 'n', long = "name", value_name = "NAME", required = true)]
@@ -299,7 +305,7 @@ async fn certificates(args: CertificatesArgs) -> Result<()> {
 }
 
 async fn devices(args: DevicesArgs) -> Result<()> {
-    let session = get_authenticated_account(None).await?;
+    let session = get_authenticated_account(args.username).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
@@ -315,7 +321,7 @@ async fn devices(args: DevicesArgs) -> Result<()> {
 }
 
 async fn register_device(args: RegisterDeviceArgs) -> Result<()> {
-    let session = get_authenticated_account(None).await?;
+    let session = get_authenticated_account(args.username).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?

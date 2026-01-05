@@ -72,9 +72,10 @@ async fn list(args: ListArgs) -> Result<()> {
     log::info!("Currently registered certificates:");
     for cert in certificates.iter() {
         log::info!(
-            " - `{}` with the serial number `{}`, expires `{:?}`, from the machine named `{}`.",
+            " - `{}` with the serial number `{}`, status `{}`, expires `{:?}`, from the machine named `{}`.",
             cert.name,
             cert.serial_number,
+            cert.status,
             cert.expiration_date,
             cert.machine_name.as_deref().unwrap_or("")
         );
