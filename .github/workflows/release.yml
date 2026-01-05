@@ -58,7 +58,7 @@ jobs:
       - name: Compress build files
         run: |
           cd ./dist
-          for dir in */; do (cd "$dir" && for file in *; do tar -czf "../${dir%/}-${file}.tar.gz" "$file"; done); done
+          for dir in */; do (cd "$dir" && for file in *; do tar -czf "../${file}.tar.gz" "$file"; done); done
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
