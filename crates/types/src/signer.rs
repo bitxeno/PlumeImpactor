@@ -368,6 +368,10 @@ impl Signer {
             settings.set_entitlements_xml(SettingsScope::Main, entitlements_xml)?;
         }
 
+        if self.options.shallow {
+            settings.set_shallow(true);
+        }
+
         UnifiedSigner::new(settings).sign_path_in_place(bundle.bundle_dir())?;
 
         Ok(())
@@ -383,7 +387,7 @@ impl Signer {
         }
 
         settings.set_for_notarization(false);
-        settings.set_shallow(true);
+        settings.set_shallow(false);
 
         Ok(settings)
     }

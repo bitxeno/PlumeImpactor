@@ -17,6 +17,8 @@ pub struct SignerOptions {
     pub install_mode: SignerInstallMode,
     /// Tweaks to apply before signing.
     pub tweaks: Option<Vec<std::path::PathBuf>>,
+    /// Shallow signing (do not recurse into nested bundles).
+    pub shallow: bool,
     /// App type.
     pub app: SignerApp,
 }
@@ -32,6 +34,7 @@ impl Default for SignerOptions {
             mode: SignerMode::default(),
             install_mode: SignerInstallMode::default(),
             tweaks: None,
+            shallow: false,
             app: SignerApp::Default,
         }
     }

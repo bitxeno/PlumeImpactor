@@ -42,6 +42,9 @@ pub struct SignArgs {
     /// Perform ad-hoc signing (no certificate required)
     #[arg(long, short, num_args = 1..)]
     pub tweaks: Option<Vec<PathBuf>>,
+    /// shallow mode means not to recurse into sign nested bundles.
+    #[arg(long)]
+    pub shallow: bool,
     /// Register device and install after signing
     #[arg(long)]
     pub register_and_install: bool,
@@ -69,6 +72,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         custom_name: args.name,
         custom_version: args.version,
         tweaks: args.tweaks,
+        shallow: args.shallow,
         ..Default::default()
     };
 
