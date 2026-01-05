@@ -51,7 +51,7 @@ async fn config() -> Result<()> {
     let config_path = get_data_path();
     log::info!("configurationPath={}", config_path.display());
 
-    // anisette data auto save to ~/.config/PlumeImpactor/state.plist
+    // anisette data auto save to ~/.config/PlumeImpactor/adb.pb or ~/.config/PlumeImpactor/state.plist
     let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
     let anisette = AnisetteData::new(anisette_config).await?;
     log::info!("anisette={:#?}", anisette);
