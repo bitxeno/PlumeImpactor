@@ -35,7 +35,7 @@ jobs:
 
       - name: Build binaries
         run: |
-          make linux PROFILE=release APPIMAGE=1
+          make linux PROFILE=release
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
