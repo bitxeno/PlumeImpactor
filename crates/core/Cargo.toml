@@ -46,6 +46,8 @@ goblin = "0.9.3"
 apple-codesign = { git = "https://github.com/PlumeImpactor/plume-apple-platform-rs", rev = "428b42f", package = "apple-codesign", default-features =  false }
 omnisette = { git = "https://github.com/PlumeImpactor/omnisette", rev = "c066ac2", package = "omnisette", features = ["remote-anisette-v3"] }
 srp = { git = "https://github.com/PlumeImpactor/plume-PAKEs", rev = "047936a", package = "srp" }
+zip = "7.0.0"
+anyhow = "1.0.100"
 
 [features]
 default = []
