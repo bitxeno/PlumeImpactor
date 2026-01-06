@@ -160,6 +160,22 @@ pub fn get_settings_path() -> PathBuf {
     get_data_path().join("accounts.json")
 }
 
+fn mask_email(email: &str) -> String {
+    if let Some(at_pos) = email.find('@') {
+        if at_pos > 1 {
+            let first_char = &email[0..1];
+            let last_char = &email[at_pos - 1..at_pos];
+            let stars = "*".repeat(at_pos - 2);
+            let domain = &email[at_pos..];
+            format!("{}{}{}{}", first_char, stars, last_char, domain)
+        } else {
+            email.to_string()
+        }
+    } else {
+        email.to_string()
+    }
+}
+
 pub async fn get_authenticated_account(username: Option<String>) -> Result<DeveloperSession> {
     let settings_path = get_settings_path();
     let settings = AccountStore::load(&Some(settings_path.clone())).await?;
@@ -191,7 +207,10 @@ pub async fn get_authenticated_account(username: Option<String>) -> Result<Devel
 
     let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
 
-    log::info!("Restoring session for {}...", gsa_account.email());
+    log::info!(
+        "Restoring session for {}...",
+        mask_email(gsa_account.email())
+    );
 
     let session = DeveloperSession::new(
         gsa_account.adsid().clone(),
