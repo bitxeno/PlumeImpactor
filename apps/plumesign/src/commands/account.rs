@@ -162,12 +162,13 @@ pub fn get_settings_path() -> PathBuf {
 
 fn mask_email(email: &str) -> String {
     if let Some(at_pos) = email.find('@') {
-        if at_pos > 1 {
-            let first_char = &email[0..1];
-            let last_char = &email[at_pos - 1..at_pos];
-            let stars = "*".repeat(at_pos - 2);
+        if at_pos > 0 {
+            let keep_chars = at_pos.min(3); // 保留前1-3个字符
+            let prefix = &email[0..keep_chars];
+            let stars_count = at_pos - keep_chars;
+            let stars = "*".repeat(stars_count);
             let domain = &email[at_pos..];
-            format!("{}{}{}{}", first_char, stars, last_char, domain)
+            format!("{}{}{}", prefix, stars, domain)
         } else {
             email.to_string()
         }
