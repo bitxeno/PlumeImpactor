@@ -54,6 +54,9 @@ pub struct SignArgs {
     /// Output path for signed .ipa (only for .ipa input)
     #[arg(long, short, value_name = "OUTPUT")]
     pub output: Option<PathBuf>,
+    /// Output path for provisioning profile (exports the first embedded profile)
+    #[arg(long, value_name = "PROVISION_OUTPUT")]
+    pub output_provision: Option<PathBuf>,
     /// Install to connected Mac (arm64 only)
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[arg(short = 'm', long = "mac", value_name = "MAC", conflicts_with = "udid")]
@@ -202,6 +205,15 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         } else {
             log::info!("Signed .ipa successfully (not archived, use -o to save)");
             pkg.remove_package_stage();
+        }
+    }
+
+    // Export provisioning profile if requested
+    if let Some(output_provision_path) = args.output_provision {
+        if let Some(first_provision) = signer.provisioning_files.first() {
+            tokio::fs::write(&output_provision_path, &first_provision.data).await?;
+        } else {
+            log::warn!("No provisioning profile available to export");
         }
     }
 
