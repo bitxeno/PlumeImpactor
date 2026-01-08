@@ -85,9 +85,7 @@ async fn afc(args: AfcArgs) -> Result<()> {
         .to_provider(UsbmuxdAddr::default(), "plume_check_afc");
 
     let mut afc = AfcClient::connect(&provider).await?;
-
-    let dir = "PublicStaging";
-    let _ = afc.get_file_info(dir).await?;
+    let _ = afc.list_dir("/").await?;
 
     println!("SUCCESS: AFC access OK");
     Ok(())
