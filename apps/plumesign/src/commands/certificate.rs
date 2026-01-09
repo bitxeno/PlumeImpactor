@@ -1,5 +1,7 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
+use plume_core::CertificateIdentity;
+use plume_shared::get_data_path;
 
 use crate::commands::account::{get_authenticated_account, teams};
 
@@ -66,16 +68,30 @@ async fn list(args: ListArgs) -> Result<()> {
         args.team_id.unwrap()
     };
 
+    let cert_identity =
+        CertificateIdentity::new_with_session(&session, get_data_path(), None, &team_id).await?;
+
+    let inuse_serial = cert_identity.serial_number.clone();
+
     let certificates = session.qh_list_certs(&team_id).await?.certificates;
 
     log::info!("You have {} certificates registered.", certificates.len());
     log::info!("Currently registered certificates:");
     for cert in certificates.iter() {
+        let inuse_flag = if let Some(ref s) = inuse_serial {
+            s == &cert.serial_number
+        } else {
+            false
+        };
+
+        let inuse_num: u8 = if inuse_flag { 1 } else { 0 };
+
         log::info!(
-            " - `{}` with the serial number `{}`, status `{}`, expires `{:?}`, from the machine named `{}`.",
+            " - `{}` with the serial number `{}`, status `{}`, inuse `{}`, expires `{:?}`, from the machine named `{}`.",
             cert.name,
             cert.serial_number,
             cert.status,
+            inuse_num,
             cert.expiration_date,
             cert.machine_name.as_deref().unwrap_or("")
         );
