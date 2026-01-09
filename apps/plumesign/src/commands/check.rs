@@ -28,6 +28,8 @@ pub enum CheckCommands {
     Config,
     /// Run AFC check and show result
     Afc(AfcArgs),
+    /// Validate a pairing file against a device (use ip to select device)
+    Pairing(PairingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -40,11 +42,70 @@ pub struct AfcArgs {
     pub udid: Option<String>,
 }
 
+#[derive(Debug, Args)]
+pub struct PairingArgs {
+    /// Device IP to target (can also be UDID or device id as fallback)
+    #[arg(short = 'i', long = "ip", value_name = "IP")]
+    pub ip: String,
+
+    /// Path to pairing file to validate
+    #[arg(short = 'f', long = "file", value_name = "PAIRING_FILE")]
+    pub pairing: String,
+
+    #[arg(short = 's', long = "save", value_name = "SAVE")]
+    pub save: bool,
+}
+
 pub async fn execute(args: CheckArgs) -> Result<()> {
     match args.command {
         CheckCommands::Config => config().await,
         CheckCommands::Afc(afc_args) => afc(afc_args).await,
+        CheckCommands::Pairing(pair_args) => pairing(pair_args).await,
     }
+}
+
+async fn pairing(args: PairingArgs) -> Result<()> {
+    use idevice::lockdown::LockdownClient;
+    use idevice::pairing_file::PairingFile;
+    use idevice::provider::TcpProvider;
+    use std::net::IpAddr;
+
+    // Build a TCP provider using the provided IP and port 62078
+    let ip: IpAddr = args
+        .ip
+        .parse()
+        .map_err(|e| anyhow::anyhow!(format!("Invalid IP: {}", e)))?;
+
+    // Read pairing file directly into a `PairingFile` structure
+    let mut pairing_file = PairingFile::read_from_file(&args.pairing)
+        .map_err(|e| anyhow::anyhow!(format!("Failed to read pairing file: {}", e)))?;
+
+    // Construct TcpProvider with port 62078 and the retrieved pairing file
+    let provider = TcpProvider {
+        addr: ip,
+        pairing_file: pairing_file.clone(),
+        label: "plume_check_pairing".to_string(),
+    };
+
+    let mut lc = LockdownClient::connect(&provider).await?;
+    lc.start_session(&pairing_file).await?;
+
+    let serial_val = lc.get_value(Some("UniqueDeviceID"), None).await?;
+    let s_udid = serial_val.as_string().unwrap_or_default().to_string();
+    if args.save {
+        if pairing_file.udid.is_none() {
+            pairing_file.udid = Some(s_udid.clone());
+        }
+
+        log::info!("Saving pairing file for device UDID: {}", s_udid);
+        let mut usbmuxd: UsbmuxdConnection = UsbmuxdConnection::default().await?;
+        let pairing_file = pairing_file.serialize().expect("failed to serialize");
+
+        usbmuxd.save_pair_record(&s_udid, pairing_file).await?;
+    }
+
+    println!("SUCCESS: UDID `{}`", s_udid);
+    Ok(())
 }
 
 async fn config() -> Result<()> {
