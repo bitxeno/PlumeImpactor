@@ -29,7 +29,7 @@ use crate::{
 #[cfg(target_os = "windows")]
 const INSTALLER_IMAGE_BYTES: &[u8] = include_bytes!("../../../package/windows/icon.rgba");
 #[cfg(target_os = "windows")]
-const INSTALLER_IMAGE_SIZE: u32 = 128;
+const INSTALLER_IMAGE_SIZE: u32 = 256;
 
 pub const APP_NAME: &str = concat!(
     env!("CARGO_PKG_NAME"),
