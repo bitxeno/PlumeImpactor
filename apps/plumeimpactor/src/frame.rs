@@ -29,7 +29,7 @@ use crate::{
 #[cfg(target_os = "windows")]
 const INSTALLER_IMAGE_BYTES: &[u8] = include_bytes!("../../../package/windows/icon.rgba");
 #[cfg(target_os = "windows")]
-const INSTALLER_IMAGE_SIZE: u32 = 128;
+const INSTALLER_IMAGE_SIZE: u32 = 256;
 
 pub const APP_NAME: &str = concat!(
     env!("CARGO_PKG_NAME"),
@@ -677,6 +677,7 @@ impl PlumeFrame {
                                     .map_err(|e| format!("Failed to sign bundle: {}", e))?;
 
                                 package_file = bundle.bundle_dir().to_path_buf();
+                                signer_settings = signer.options;
                             }
                             SignerMode::Adhoc => {
                                 let mut signer = Signer::new(None, signer_settings.clone());
@@ -710,6 +711,7 @@ impl PlumeFrame {
                                     .map_err(|e| format!("Failed to sign bundle: {}", e))?;
 
                                 package_file = bundle.bundle_dir().to_path_buf();
+                                signer_settings = signer.options;
                             }
                             _ => {
                                 let bundle = package
