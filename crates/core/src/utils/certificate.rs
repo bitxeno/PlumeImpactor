@@ -487,6 +487,9 @@ impl CertificateIdentity {
                 })?;
 
                 let key_path = Self::key_dir(config_path, team_id)?.join("key.pem");
+                if let Some(parent) = key_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
                 fs::write(&key_path, key_pem)?;
                 return Ok(());
             }
