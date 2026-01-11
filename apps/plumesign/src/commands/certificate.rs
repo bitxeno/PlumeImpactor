@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use plume_core::CertificateIdentity;
@@ -19,6 +21,52 @@ pub enum CertificateCommands {
     List(ListArgs),
     /// Revoke a certificate by serial number
     Revoke(RevokeArgs),
+    /// Export the active certificate as a P12 file
+    Export(ExportArgs),
+    /// Import a certificate from a P12 file and restore key.pem
+    Import(ImportArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ImportArgs {
+    /// Email of the account to use (if team_id not provided)
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
+    /// Team ID mapping to the certificate (required if offline)
+    #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
+    pub team_id: Option<String>,
+    /// Password for the P12 file
+    #[arg(
+        short = 'p',
+        long = "password",
+        value_name = "PASSWORD",
+        required = true
+    )]
+    pub password: String,
+    /// Input path for the P12 file
+    #[arg(short = 'i', long = "input", value_name = "PATH", required = true)]
+    pub input: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct ExportArgs {
+    /// Email of the account to use
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
+    /// Team ID containing the certificate
+    #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
+    pub team_id: Option<String>,
+    /// Password for the P12 file
+    #[arg(
+        short = 'p',
+        long = "password",
+        value_name = "PASSWORD",
+        required = true
+    )]
+    pub password: String,
+    /// Output path for the P12 file
+    #[arg(short = 'o', long = "output", value_name = "PATH", required = true)]
+    pub output: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -56,6 +104,8 @@ pub async fn execute(args: CertificateArgs) -> Result<()> {
     match args.command {
         CertificateCommands::List(list_args) => list(list_args).await,
         CertificateCommands::Revoke(revoke_args) => revoke(revoke_args).await,
+        CertificateCommands::Export(export_args) => export(export_args).await,
+        CertificateCommands::Import(import_args) => import(import_args).await,
     }
 }
 
@@ -139,6 +189,51 @@ async fn revoke(args: RevokeArgs) -> Result<()> {
     } else {
         log::info!("Certificate revoke request completed (no message).");
     }
+
+    Ok(())
+}
+
+async fn export(args: ExportArgs) -> Result<()> {
+    let session = get_authenticated_account(args.username).await?;
+
+    let team_id = if args.team_id.is_none() {
+        teams(&session).await?
+    } else {
+        args.team_id.unwrap()
+    };
+
+    let config_path = get_data_path();
+
+    let p12_data =
+        CertificateIdentity::export_pkcs12(&session, config_path, None, &team_id, &args.password)
+            .await?;
+
+    std::fs::write(&args.output, p12_data)?;
+    log::info!("Successfully exported P12 certificate to {:?}", args.output);
+
+    Ok(())
+}
+
+async fn import(args: ImportArgs) -> Result<()> {
+    let session = get_authenticated_account(args.username).await?;
+
+    let team_id = if args.team_id.is_none() {
+        teams(&session).await?
+    } else {
+        args.team_id.unwrap()
+    };
+
+    let p12_data = std::fs::read(&args.input)?;
+    let config_path = get_data_path();
+
+    CertificateIdentity::import_pkcs12(&session, config_path, &team_id, &p12_data, &args.password)
+        .await?;
+
+    log::info!(
+        "Successfully imported certificate key for team {} from {:?}",
+        team_id,
+        args.input
+    );
 
     Ok(())
 }

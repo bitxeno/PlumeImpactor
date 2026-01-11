@@ -364,4 +364,132 @@ impl CertificateIdentity {
 
         None
     }
+
+    pub async fn export_pkcs12(
+        session: &DeveloperSession,
+        config_path: PathBuf,
+        machine_name: Option<String>,
+        team_id: &String,
+        password: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let machine_name = machine_name.unwrap_or_else(|| MACHINE_NAME.to_string());
+        let key_path = Self::key_dir(config_path, team_id)?.join("key.pem");
+
+        let certs = session.qh_list_certs(team_id).await?.certificates;
+
+        let key_pair: [Vec<u8>; 2] = if key_path.exists() {
+            let key_string = fs::read_to_string(&key_path)?;
+            let priv_key = RsaPrivateKey::from_pkcs8_pem(&key_string)?;
+
+            let mut cert = Self {
+                cert: None,
+                key: None,
+                machine_id: None,
+                p12_data: None,
+                serial_number: None,
+            };
+            if let Some(cert) = cert
+                .find_certificate(certs.clone(), &priv_key, &machine_name)
+                .await?
+            {
+                let cert_pem =
+                    encode_string("CERTIFICATE", LineEnding::LF, cert.cert_content.as_ref())
+                        .unwrap();
+                let key_pem = priv_key.to_pkcs8_pem(Default::default())?.to_string();
+
+                [cert_pem.into_bytes(), key_pem.into_bytes()]
+            } else {
+                return Err(Error::Certificate("Certificate not found".into()));
+            }
+        } else {
+            return Err(Error::Certificate("Certificate key not found".into()));
+        };
+
+        let cert_der = pem::parse(&key_pair[0])
+            .map_err(Error::Pem)?
+            .contents()
+            .to_vec();
+        let key_der = pem::parse(&key_pair[1])
+            .map_err(Error::Pem)?
+            .contents()
+            .to_vec();
+
+        let cert = p12_keystore::Certificate::from_der(&cert_der)
+            .map_err(|e| Error::Certificate(format!("Failed to parse certificate: {:?}", e)))?;
+
+        let local_key_id = {
+            use sha1::{Digest, Sha1};
+            let mut hasher = Sha1::new();
+            hasher.update(&key_der);
+            let hash = hasher.finalize();
+            hash[..8].to_vec()
+        };
+
+        let key_chain = p12_keystore::PrivateKeyChain::new(key_der, local_key_id, vec![cert]);
+
+        let mut keystore = p12_keystore::KeyStore::new();
+        keystore.add_entry(
+            "plume",
+            p12_keystore::KeyStoreEntry::PrivateKeyChain(key_chain),
+        );
+
+        let writer = keystore.writer(password);
+        let p12_data = writer
+            .write()
+            .map_err(|e| Error::Certificate(format!("Failed to write P12: {:?}", e)))?;
+
+        Ok(p12_data)
+    }
+
+    pub async fn import_pkcs12(
+        session: &DeveloperSession,
+        config_path: PathBuf,
+        team_id: &String,
+        p12_data: &[u8],
+        password: &str,
+    ) -> Result<(), Error> {
+        // Parse P12 using p12_keystore
+        let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
+            .map_err(|e| Error::Certificate(format!("Failed to parse P12: {:?}", e)))?;
+
+        // Extract the first private key chain we find
+        let mut found_key = None;
+        for (_, entry) in keystore.entries() {
+            if let p12_keystore::KeyStoreEntry::PrivateKeyChain(chain) = entry {
+                found_key = Some(chain.key().to_vec());
+                break;
+            }
+        }
+
+        let key_der = found_key
+            .ok_or_else(|| Error::Certificate("No private key found in P12 file".into()))?;
+
+        let certificates = session.qh_list_certs(&team_id).await?.certificates;
+        let parsed_key = RsaPrivateKey::from_pkcs8_der(&key_der)
+            .map_err(|e| Error::Certificate(format!("Failed to parse private key: {:?}", e)))?;
+
+        let pub_key_der_obj = parsed_key
+            .to_public_key()
+            .to_pkcs1_der()?
+            .as_bytes()
+            .to_vec();
+        for cert in certificates {
+            let parsed_cert = X509Certificate::from_der(&cert.cert_content)?;
+            if pub_key_der_obj == parsed_cert.public_key_data().as_ref() {
+                // Convert DER to PEM
+                let key_pem = pem_rfc7468::encode_string("PRIVATE KEY", LineEnding::LF, &key_der)
+                    .map_err(|e| {
+                    Error::Certificate(format!("Failed to encode key as PEM: {:?}", e))
+                })?;
+
+                let key_path = Self::key_dir(config_path, team_id)?.join("key.pem");
+                fs::write(&key_path, key_pem)?;
+                return Ok(());
+            }
+        }
+
+        Err(Error::Certificate(
+            "No matching certificate found for the provided P12".into(),
+        ))
+    }
 }
