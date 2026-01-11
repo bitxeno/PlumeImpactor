@@ -226,8 +226,15 @@ async fn import(args: ImportArgs) -> Result<()> {
     let p12_data = std::fs::read(&args.input)?;
     let config_path = get_data_path();
 
-    CertificateIdentity::import_pkcs12(&session, config_path, &team_id, &p12_data, &args.password)
-        .await?;
+    CertificateIdentity::import_pkcs12(
+        &session,
+        config_path,
+        None,
+        &team_id,
+        &p12_data,
+        &args.password,
+    )
+    .await?;
 
     log::info!(
         "Successfully imported certificate key for team {} from {:?}",

@@ -444,10 +444,12 @@ impl CertificateIdentity {
     pub async fn import_pkcs12(
         session: &DeveloperSession,
         config_path: PathBuf,
+        machine_name: Option<String>,
         team_id: &String,
         p12_data: &[u8],
         password: &str,
     ) -> Result<(), Error> {
+        let machine_name = machine_name.unwrap_or_else(|| MACHINE_NAME.to_string());
         // Parse P12 using p12_keystore
         let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
             .map_err(|e| Error::Certificate(format!("Failed to parse P12: {:?}", e)))?;
@@ -475,7 +477,9 @@ impl CertificateIdentity {
             .to_vec();
         for cert in certificates {
             let parsed_cert = X509Certificate::from_der(&cert.cert_content)?;
-            if pub_key_der_obj == parsed_cert.public_key_data().as_ref() {
+            if cert.machine_name.as_deref() == Some(machine_name.as_str())
+                && pub_key_der_obj == parsed_cert.public_key_data().as_ref()
+            {
                 // Convert DER to PEM
                 let key_pem = pem_rfc7468::encode_string("PRIVATE KEY", LineEnding::LF, &key_der)
                     .map_err(|e| {
