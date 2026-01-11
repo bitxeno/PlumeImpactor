@@ -93,6 +93,11 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         (bundle, Some(pkg))
     };
 
+    if let Ok(app) = bundle.detect_app() {
+        log::info!("Detected app type: {:?}", app);
+        options.app = app;
+    }
+
     let (mut signer, team_id_opt) = if let Some(ref pem_files) = args.pem_files {
         let cert_identity = CertificateIdentity::new_with_paths(Some(pem_files.clone())).await?;
 

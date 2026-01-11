@@ -68,18 +68,21 @@ async fn list(args: ListArgs) -> Result<()> {
         args.team_id.unwrap()
     };
 
-    let cert_identity =
-        CertificateIdentity::new_with_session(&session, get_data_path(), None, &team_id).await?;
-
-    let inuse_serial = cert_identity.serial_number.clone();
-
     let certificates = session.qh_list_certs(&team_id).await?.certificates;
+
+    let inuse_cert = CertificateIdentity::find_active_certificate(
+        get_data_path(),
+        None,
+        &team_id,
+        &certificates,
+    )
+    .await;
 
     log::info!("You have {} certificates registered.", certificates.len());
     log::info!("Currently registered certificates:");
     for cert in certificates.iter() {
-        let inuse_flag = if let Some(ref s) = inuse_serial {
-            s == &cert.serial_number
+        let inuse_flag = if let Some(ref active_cert) = inuse_cert {
+            active_cert.serial_number.as_ref() == Some(&cert.serial_number)
         } else {
             false
         };

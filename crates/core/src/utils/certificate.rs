@@ -331,4 +331,37 @@ impl CertificateIdentity {
 
         Ok(())
     }
+
+    pub async fn find_active_certificate(
+        config_path: PathBuf,
+        machine_name: Option<String>,
+        team_id: &String,
+        certs: &[Cert],
+    ) -> Option<CertificateIdentity> {
+        let machine_name = machine_name.unwrap_or_else(|| MACHINE_NAME.to_string());
+        let key_path = Self::key_dir(config_path, &team_id).ok()?.join("key.pem");
+
+        if key_path.exists() {
+            let key_string = fs::read_to_string(&key_path).ok()?;
+            let priv_key = RsaPrivateKey::from_pkcs8_pem(&key_string).ok()?;
+
+            let mut cert = Self {
+                cert: None,
+                key: None,
+                machine_id: None,
+                p12_data: None,
+                serial_number: None,
+            };
+
+            if let Some(_found_cert) = cert
+                .find_certificate(certs.to_vec(), &priv_key, &machine_name)
+                .await
+                .ok()?
+            {
+                return Some(cert);
+            }
+        }
+
+        None
+    }
 }

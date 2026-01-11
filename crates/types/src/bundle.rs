@@ -1,5 +1,5 @@
 use super::PlistInfoTrait;
-use crate::Error;
+use crate::{Error, SignerApp};
 use goblin::mach::{
     fat::FAT_MAGIC,
     header::{MH_MAGIC, MH_MAGIC_64},
@@ -186,6 +186,27 @@ impl PlistInfoTrait for Bundle {
 
     fn get_platform_name(&self) -> Option<String> {
         get_plist_string!(self, "DTPlatformName")
+    }
+}
+
+impl Bundle {
+    pub fn detect_app(&self) -> Result<SignerApp, Error> {
+        let bundles = self
+            .collect_bundles_sorted()?
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        if bundles
+            .iter()
+            .find(|b| b.bundle_dir().ends_with("SideStoreApp.framework"))
+            .is_some()
+        {
+            Ok(SignerApp::LiveContainerAndSideStore)
+        } else {
+            Ok(SignerApp::from_bundle_identifier(
+                self.get_bundle_identifier().as_deref(),
+            ))
+        }
     }
 }
 
