@@ -61,6 +61,9 @@ pub struct SignArgs {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[arg(short = 'm', long = "mac", value_name = "MAC", conflicts_with = "udid")]
     pub mac: bool,
+    /// Remove app extensions before signing
+    #[arg(long)]
+    pub remove_extensions: bool,
 }
 
 pub async fn execute(args: SignArgs) -> Result<()> {
@@ -78,6 +81,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         shallow: args.shallow,
         ..Default::default()
     };
+    options.embedding.remove_extensions = args.remove_extensions;
 
     let (bundle, package) = if args.package.is_dir() {
         log::warn!("⚠️  Signing bundle in place: {}", args.package.display());

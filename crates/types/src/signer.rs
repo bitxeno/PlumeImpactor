@@ -153,6 +153,46 @@ impl Signer {
             macho.replace_sdk_version("26.0.0")?;
         }
 
+        // If requested, remove app extensions (PlugIns) from the main bundle.
+        if self.options.embedding.remove_extensions && *bundle.bundle_type() == BundleType::App {
+            // Remove embedded app extension bundles (usually under PlugIns/)
+            if let Ok(mut embedded) = bundle.collect_nested_bundles() {
+                for eb in &embedded {
+                    if *eb.bundle_type() == BundleType::AppExtension {
+                        let _ = std::fs::remove_dir_all(&eb.bundle_dir());
+                    }
+                }
+            }
+
+            // Update SC_Info/Manifest.plist -> SinfReplicationPaths to remove PlugIns entries
+            let sc_info_dir = bundle.bundle_dir().join("SC_Info");
+            let manifest_path = sc_info_dir.join("Manifest.plist");
+
+            if manifest_path.exists() {
+                if let Ok(mut manifest_plist) = plist::Value::from_file(&manifest_path) {
+                    if let Some(dict) = manifest_plist.as_dictionary_mut() {
+                        if let Some(plist::Value::Array(paths)) =
+                            dict.get_mut("SinfReplicationPaths")
+                        {
+                            let replacement: Vec<plist::Value> = paths
+                                .iter()
+                                .filter_map(|v| v.as_string().map(|s| s.to_string()))
+                                .filter(|s| !s.starts_with("PlugIns/"))
+                                .into_iter()
+                                .map(plist::Value::String)
+                                .collect();
+
+                            dict.insert(
+                                "SinfReplicationPaths".to_string(),
+                                plist::Value::Array(replacement),
+                            );
+                            let _ = manifest_plist.to_file_xml(&manifest_path);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 

@@ -73,6 +73,7 @@ pub struct SignerFeatures {
 #[derive(Clone, Debug, Default)]
 pub struct SignerEmbedding {
     pub single_profile: bool,
+    pub remove_extensions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
