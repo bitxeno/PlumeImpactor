@@ -25,6 +25,7 @@ tray-icon = { version = "0.21.2", default-features = false }
 image = "0.25"
 rfd = "0.16.0"
 iced_aw = { version = "0.13.0", features = ["selection_list"] }
+open = "5.3.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 plume_gestalt = { path = "../../crates/plume_gestalt" }

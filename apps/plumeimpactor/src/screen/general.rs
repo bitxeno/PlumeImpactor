@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, image, row, text};
-use iced::{Center, Element, Fill, Task};
+use iced::{Center, Color, Element, Fill, Task};
 use plume_utils::Package;
 
 use crate::appearance;
@@ -17,6 +17,7 @@ pub enum Message {
     FileSelected(Option<std::path::PathBuf>),
     NavigateToInstaller(plume_utils::Package),
     NavigateToUtilities,
+    OpenGitHub,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -56,6 +57,10 @@ impl GeneralScreen {
                 }
                 Task::none()
             }
+            Message::OpenGitHub => {
+                let _ = open::that("https://github.com/khcrysalis/PlumeImpactor");
+                Task::none()
+            }
             _ => Task::none(),
         }
     }
@@ -67,8 +72,14 @@ impl GeneralScreen {
 
         let screen_content = image(image_handle.clone()).height(INSTALL_IMAGE_HEIGHT);
 
+        let footer_links =
+            button(text("Give me a ⭐ star :3").color(Color::from_rgb(1.0, 0.75, 0.8)))
+                .on_press(Message::OpenGitHub)
+                .style(iced::widget::button::text);
+
         column![
             container(screen_content).center(Fill).height(Fill),
+            container(footer_links).width(Fill),
             self.view_buttons()
         ]
         .into()
