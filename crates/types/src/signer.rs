@@ -209,9 +209,14 @@ impl Signer {
                     .get_bundle_identifier()
                     .ok_or_else(|| Error::Other("Failed to get bundle identifier.".into()))?;
 
-                session
-                    .qh_ensure_app_id(&team_id, &sub_bundle.get_name().unwrap_or_default(), &id)
-                    .await?;
+                let appid_name = sub_bundle.get_bundle_name().unwrap_or_else(|| {
+                    id.split('.')
+                        .last()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| id.clone())
+                });
+
+                session.qh_ensure_app_id(&team_id, &appid_name, &id).await?;
 
                 let app_id_id = session
                     .qh_get_app_id(&team_id, &id)
