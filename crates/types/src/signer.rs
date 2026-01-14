@@ -434,6 +434,10 @@ impl Signer {
         settings.set_for_notarization(false);
         settings.set_shallow(false);
 
+        // ignore object files, codesign treats it as a Mach-O file by default when signing, which causes an error.
+        // example: python.o files in Kodi.
+        let _ = settings.add_path_exclusion("**/*.o");
+
         Ok(settings)
     }
 
