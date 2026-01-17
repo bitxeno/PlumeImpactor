@@ -168,6 +168,10 @@ impl PlistInfoTrait for Bundle {
         get_plist_string!(self, "CFBundleIdentifier")
     }
 
+    fn get_bundle_name(&self) -> Option<String> {
+        get_plist_string!(self, "CFBundleName")
+    }
+
     fn get_version(&self) -> Option<String> {
         get_plist_string!(self, "CFBundleShortVersionString")
     }

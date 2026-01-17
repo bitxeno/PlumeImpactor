@@ -166,6 +166,10 @@ impl PlistInfoTrait for Package {
         get_plist_dict_value!(self, "CFBundleIdentifier")
     }
 
+    fn get_bundle_name(&self) -> Option<String> {
+        get_plist_dict_value!(self, "CFBundleName")
+    }
+
     fn get_version(&self) -> Option<String> {
         get_plist_dict_value!(self, "CFBundleShortVersionString")
     }

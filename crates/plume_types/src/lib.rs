@@ -60,6 +60,7 @@ pub trait PlistInfoTrait {
     fn get_name(&self) -> Option<String>;
     fn get_executable(&self) -> Option<String>;
     fn get_bundle_identifier(&self) -> Option<String>;
+    fn get_bundle_name(&self) -> Option<String>;
     fn get_version(&self) -> Option<String>;
     fn get_build_version(&self) -> Option<String>;
 }
