@@ -10,12 +10,16 @@ pub(crate) fn build_tray_icon(menu: &Menu) -> TrayIcon {
         .with_menu(Box::new(menu.clone()))
         .with_tooltip(crate::APP_NAME)
         .with_icon(icon)
+        .with_icon_as_template(true)
         .build()
         .expect("Failed to build tray icon")
 }
 
 fn load_icon() -> Icon {
+    #[cfg(all(target_os = "macos"))]
     let bytes = include_bytes!("./tray.png");
+    #[cfg(all(not(target_os = "macos")))]
+    let bytes = include_bytes!("./tray_colored.png");
     let image = image::load_from_memory(bytes)
         .expect("Failed to load icon bytes")
         .to_rgba8();
