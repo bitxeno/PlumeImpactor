@@ -13,9 +13,22 @@ use crate::Error;
 pub async fn parse_response(
     res: Result<Response, reqwest::Error>,
 ) -> Result<plist::Dictionary, Error> {
-    let res = res?.text().await?;
-    let res: plist::Dictionary = plist::from_bytes(res.as_bytes())?;
-    let res: plist::Value = res.get("Response").unwrap().to_owned();
+    let res = res?;
+    let status = res.status();
+    let url = res.url().clone();
+    let body = res.text().await?;
+
+    let dict: plist::Dictionary = plist::from_bytes(body.as_bytes()).map_err(|e| {
+        eprintln!(
+            "Failed to parse plist response. Status: {}, URL: {}, Body: {}",
+            status,
+            url,
+            body.chars().take(200).collect::<String>()
+        );
+        e
+    })?;
+
+    let res: plist::Value = dict.get("Response").ok_or(crate::Error::Parse)?.to_owned();
     match res {
         plist::Value::Dictionary(dict) => Ok(dict),
         _ => Err(crate::Error::Parse),
