@@ -4,12 +4,14 @@ use anyhow::Result;
 use clap::Args;
 
 use plume_core::{CertificateIdentity, MobileProvision};
-use plume_shared::get_data_path;
 use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
 
-use crate::commands::{
-    account::{get_authenticated_account, teams},
-    device::select_device,
+use crate::{
+    commands::{
+        account::{get_authenticated_account, teams},
+        device::select_device,
+    },
+    get_data_path,
 };
 
 #[derive(Debug, Args)]
@@ -111,7 +113,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         let session = get_authenticated_account(args.username.clone()).await?;
         let team_id = teams(&session).await?;
         let cert_identity =
-            CertificateIdentity::new_with_session(&session, get_data_path(), None, &team_id)
+            CertificateIdentity::new_with_session(&session, get_data_path(), None, &team_id, false)
                 .await?;
 
         options.mode = SignerMode::Pem;
@@ -140,6 +142,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
                     udid: String::new(),
                     device_id: 0,
                     usbmuxd_device: None,
+                    is_mac: true,
                 })
             } else {
                 Some(select_device(args.udid).await?)
@@ -165,14 +168,16 @@ pub async fn execute(args: SignArgs) -> Result<()> {
                 .await?;
         }
 
-        signer.register_bundle(&bundle, &session, &team_id).await?;
+        signer
+            .register_bundle(&bundle, &session, &team_id, false)
+            .await?;
         signer.sign_bundle(&bundle).await?;
 
         if let Some(dev) = device {
             log::info!("Installing to device: {}", dev.name);
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             if args.mac {
-                dev.install_app_mac(&bundle.bundle_dir()).await?;
+                plume_utils::install_app_mac(&bundle.bundle_dir()).await?;
             } else {
                 dev.install_app(bundle.bundle_dir(), |progress| async move {
                     log::info!("Installation progress: {}%", progress);
@@ -207,7 +212,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
     if let Some(pkg) = package {
         if let Some(output_path) = args.output {
-            let archived_path = pkg.get_archive_based_on_path(args.package.clone())?;
+            let archived_path = pkg.get_archive_based_on_path(&args.package.clone())?;
             tokio::fs::copy(&archived_path, &output_path).await?;
             log::info!("Saved signed package to: {}", output_path.display());
             pkg.remove_package_stage();

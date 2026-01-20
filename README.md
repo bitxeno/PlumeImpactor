@@ -1,4 +1,4 @@
-# PlumeImpactor
+# <img src="https://github.com/user-attachments/assets/18f2eff4-546f-4365-98eb-afb19b13dc13" width="25" height="25" /> Impactor
 
 [![GitHub Release](https://img.shields.io/github/v/release/khcrysalis/PlumeImpactor?include_prereleases)](https://github.com/khcrysalis/PlumeImpactor/releases)
 [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/khcrysalis/PlumeImpactor/total)](https://github.com/khcrysalis/PlumeImpactor/releases)
@@ -11,24 +11,25 @@ Open-source, cross-platform, and feature rich iOS sideloading application. Suppo
 
 [^2]: On Windows, [iTunes](https://support.apple.com/en-us/106372) must be downloaded so Impactor is able to use the drivers for interacting with Apple devices.
 
-| ![Demo of app](demo.png)                                                                            |
-| :--------------------------------------------------------------------------------------------------: |
-| Screenshot of Impactor after importing [Feather](https://github.com/khcrysalis/Feather). |
+![Demo of app](demo.png)
 
 ### Features
 
 - User friendly and clean UI.
 - Supports Linux.
 - Sign and sideload applications on iOS 9.0+ & Mac with your Apple ID.
-  - Installing with AppSync is supported.
+  - Installing with [AppSync](https://github.com/akemin-dayo/AppSync) is supported.
   - Installing with ipatool gotten ipa's is supported.
     - Automatically disables updates from the App Store.
 - Simple customization options for the app.
 - Tweak support for advanced users, using [ElleKit](https://github.com/tealbathingsuit/ellekit) for injection.
   - Supports injecting `.deb` and `.dylib` files.
   - Supports adding `.framework`, `.bundle`, and `.appex` directories.
-- Generates P12 for SideStore/AltStore to use, similar to how Altserver works.
+  - Supports replacing Cydia Substrate with ElleKit for 26.0 compatibility.
+- Generates P12 for SideStore/AltStore to use, similar to Altserver.
 - Automatically populate pairing files for apps like SideStore, Antrag, and Protokolle.
+- Comes with simple device utilities for retrusting/placing pairing file.
+- Export P12 for use with LiveContainer.
 - Almost *proper* entitlement handling and can register app plugins.
   - Able to request entitlements like `increased-memory-limit`, for emulators like MelonX or UTM.
 
@@ -50,6 +51,21 @@ Lastly, we do all of the necessary modifications we need to the app you're tryin
 
 That's the entire gist of how this works! Of course its very short and brief, however feel free to look how it works since its open source :D
 
+### Pairing File
+
+Impactor also allows the user to generate a pairing file for applications to talk directly to the device remotely. This pairing file is device specific and will become invalid if you ever re-trust/update/reset.
+
+Supported apps:
+- `SideStore`
+- `Feather`
+- `SparseBox`
+- `LiveContainer + SideStore`
+- `Antrag`
+- `Protokolle`
+- `StikDebug`
+
+You can retrieve this file by either sideloading the supported app of your choice, or going to the `Utilities` page when a device is connected and press install for the supported app. Head over to the [downloads](https://github.com/khcrysalis/PlumeImpactor/releases).
+
 ## Structure
 
 The project is seperated in multiple modules, all serve single or multiple uses depending on their importance.
@@ -66,7 +82,6 @@ The project is seperated in multiple modules, all serve single or multiple uses 
 ## Building
 
 Building is going to be a bit convoluted for each platform, each having their own unique specifications, but the best reference for building should be looking at how [GitHub actions](./.github/workflows/build.yml) does it.
-
 
 You need:
 - [Rust](https://rustup.rs/).
@@ -107,6 +122,16 @@ sudo dnf install clang-devel pkg-config gtk3-devel libpng-devel libjpeg-devel me
 | <img src="https://raw.githubusercontent.com/khcrysalis/github-sponsor-graph/main/graph.png"> |
 | _**"samara is cute" - Vendicated**_ |
 
+## Star History
+
+<a href="https://star-history.com/#khcrysalis/plumeimpactor&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=khcrysalis/plumeimpactor&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=khcrysalis/plumeimpactor&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=khcrysalis/plumeimpactor&type=Date" />
+ </picture>
+</a>
+
 ## Acknowledgements
 
 - [SAMSAM](https://github.com/khcrysalis) – The maker.
@@ -116,6 +141,10 @@ sudo dnf install clang-devel pkg-config gtk3-devel libpng-devel libjpeg-devel me
 - [PyDunk](https://github.com/nythepegasus/PyDunk) – `v1` Apple Developer API references.
 - [idevice](https://github.com/jkcoxson/idevice) – Used for communication with `installd`, specifically for sideloading the apps to your devices.
 - [apple-codesign-rs](https://github.com/indygreg/apple-platform-rs) – Codesign alternative, modified and extended upon to work for Impactor.
+
+<a href="https://github.com/iced-rs/iced">
+  <img src="https://gist.githubusercontent.com/hecrj/ad7ecd38f6e47ff3688a38c79fd108f0/raw/74384875ecbad02ae2a926425e9bcafd0695bade/color.svg" width="130px">
+</a>
 
 ## License
 

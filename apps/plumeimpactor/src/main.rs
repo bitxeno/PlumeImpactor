@@ -1,41 +1,62 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod frame;
-mod handlers;
-mod pages;
+use crate::refresh::spawn_refresh_daemon;
 
-#[tokio::main]
-async fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    _ = rustls::crypto::ring::default_provider()
-        .install_default()
-        .unwrap();
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use single_instance::SingleInstance;
 
-    let _ = wxdragon::main(|_| {
-        #[cfg(target_os = "windows")]
-        {
-            use wxdragon::{AppAppearance, appearance::Appearance};
-            if let Some(app) = wxdragon::app::get_app() {
-                app.set_appearance(Appearance::Dark);
+mod appearance;
+mod defaults;
+mod refresh;
+mod screen;
+mod subscriptions;
+mod startup;
+mod tray;
+
+pub const APP_NAME: &str = "Impactor";
+pub const APP_NAME_VERSIONED: &str = concat!("Impactor", " - Version ", env!("CARGO_PKG_VERSION"));
+
+fn main() -> iced::Result {
+    env_logger::init();
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let _single_instance = match SingleInstance::new(APP_NAME) {
+        Ok(instance) => {
+            if !instance.is_single() {
+                log::info!("Another instance is already running; exiting.");
+                return Ok(());
             }
+            Some(instance)
         }
+        Err(err) => {
+            log::warn!("Failed to acquire single-instance lock: {err}");
+            None
+        }
+    };
 
-        frame::PlumeFrame::new().show();
-    });
-}
+    #[cfg(target_os = "linux")]
+    {
+        gtk::init().expect("GTK init failed");
+    }
 
-use thiserror::Error as ThisError;
+    #[cfg(target_os = "macos")]
+    {
+        notify_rust::get_bundle_identifier_or_default("Impactor");
+        let _ = notify_rust::set_application("dev.khcrysalis.PlumeImpactor");
+    }
 
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Plist error: {0}")]
-    Plist(#[from] plist::Error),
-    #[error("Idevice error: {0}")]
-    Idevice(#[from] idevice::IdeviceError),
-    #[error("Core error: {0}")]
-    Core(#[from] plume_core::Error),
-    #[error("Utils error: {0}")]
-    Utils(#[from] plume_utils::Error),
+    let (_daemon_handle, connected_devices) = spawn_refresh_daemon();
+    screen::set_refresh_daemon_devices(connected_devices);
+
+    iced::daemon(
+        screen::Impactor::new,
+        screen::Impactor::update,
+        screen::Impactor::view,
+    )
+    .subscription(screen::Impactor::subscription)
+    .title(APP_NAME_VERSIONED)
+    .theme(appearance::PlumeTheme::default().to_iced_theme())
+    .settings(defaults::default_settings())
+    .run()
 }
