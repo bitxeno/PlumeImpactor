@@ -66,6 +66,9 @@ pub struct SignArgs {
     /// Remove app extensions before signing
     #[arg(long)]
     pub remove_extensions: bool,
+    /// Refresh the app on the device
+    #[arg(long)]
+    pub refresh: bool,
 }
 
 pub async fn execute(args: SignArgs) -> Result<()> {
@@ -161,39 +164,54 @@ pub async fn execute(args: SignArgs) -> Result<()> {
             .modify_bundle(&bundle, &Some(team_id.clone()))
             .await?;
 
-        if let Some(ref dev) = device {
-            log::info!("Registering device: {} ({})", dev.name, dev.udid);
-            session
-                .qh_ensure_device(&team_id, &dev.name, &dev.udid)
+        if args.refresh {
+            signer
+                .register_bundle(&bundle, &session, &team_id, false)
                 .await?;
-        }
 
-        signer
-            .register_bundle(&bundle, &session, &team_id, false)
-            .await?;
-        signer.sign_bundle(&bundle).await?;
-
-        if let Some(dev) = device {
-            log::info!("Installing to device: {}", dev.name);
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            if args.mac {
-                plume_utils::install_app_mac(&bundle.bundle_dir()).await?;
-            } else {
-                dev.install_app(bundle.bundle_dir(), |progress| async move {
-                    log::info!("Installation progress: {}%", progress);
-                })
-                .await?;
+            log::info!("Skip signing while in refresh mode");
+            if let Some(ref dev) = device {
+                log::info!("Installing to device: {}", dev.name);
+                for provision in &signer.provisioning_files {
+                    dev.install_profile(provision).await?
+                }
+                log::info!("Installation complete!");
+            }
+        } else {
+            if let Some(ref dev) = device {
+                log::info!("Registering device: {} ({})", dev.name, dev.udid);
+                session
+                    .qh_ensure_device(&team_id, &dev.name, &dev.udid)
+                    .await?;
             }
 
-            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-            {
-                dev.install_app(bundle.bundle_dir(), |progress| async move {
-                    log::info!("Installation progress: {}%", progress);
-                })
+            signer
+                .register_bundle(&bundle, &session, &team_id, false)
                 .await?;
-            }
+            signer.sign_bundle(&bundle).await?;
 
-            log::info!("Installation complete!");
+            if let Some(dev) = device {
+                log::info!("Installing to device: {}", dev.name);
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                if args.mac {
+                    plume_utils::install_app_mac(&bundle.bundle_dir()).await?;
+                } else {
+                    dev.install_app(bundle.bundle_dir(), |progress| async move {
+                        log::info!("Installation progress: {}%", progress);
+                    })
+                    .await?;
+                }
+
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                {
+                    dev.install_app(bundle.bundle_dir(), |progress| async move {
+                        log::info!("Installation progress: {}%", progress);
+                    })
+                    .await?;
+                }
+
+                log::info!("Installation complete!");
+            }
         }
     } else {
         signer.modify_bundle(&bundle, &None).await?;
@@ -217,7 +235,6 @@ pub async fn execute(args: SignArgs) -> Result<()> {
             log::info!("Saved signed package to: {}", output_path.display());
             pkg.remove_package_stage();
         } else {
-            log::info!("Signed .ipa successfully (not archived, use -o to save)");
             pkg.remove_package_stage();
         }
     }
