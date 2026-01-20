@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
+use crate::get_data_path;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use plume_core::CertificateIdentity;
-use plume_shared::get_data_path;
 
 use crate::commands::account::{get_authenticated_account, teams};
 

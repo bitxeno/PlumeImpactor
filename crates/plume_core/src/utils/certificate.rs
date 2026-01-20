@@ -366,12 +366,13 @@ impl CertificateIdentity {
             let key_string = fs::read_to_string(&key_path).ok()?;
             let priv_key = RsaPrivateKey::from_pkcs8_pem(&key_string).ok()?;
 
-            let mut cert = Self {
+            let mut cert: CertificateIdentity = Self {
                 cert: None,
                 key: None,
                 machine_id: None,
                 p12_data: None,
                 serial_number: None,
+                new: false,
             };
 
             if let Some(_found_cert) = cert
@@ -408,6 +409,7 @@ impl CertificateIdentity {
                 machine_id: None,
                 p12_data: None,
                 serial_number: None,
+                new: false,
             };
             if let Some(cert) = cert
                 .find_certificate(certs.clone(), &priv_key, &machine_name)

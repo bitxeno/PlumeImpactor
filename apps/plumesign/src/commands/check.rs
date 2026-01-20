@@ -1,12 +1,12 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+use crate::get_data_path;
 use idevice::IdeviceService;
 use idevice::afc::AfcClient;
 use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
 use plume_core::AnisetteConfiguration;
 use plume_core::auth::anisette_data::AnisetteData;
-use plume_shared::get_data_path;
 
 use crate::commands::device::select_device;
 use plume_utils::Device;
