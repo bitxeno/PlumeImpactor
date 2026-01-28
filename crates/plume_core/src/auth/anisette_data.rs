@@ -26,9 +26,6 @@ pub struct AnisetteData {
 
 impl AnisetteData {
     pub async fn new(config: AnisetteConfiguration) -> Result<Self, Error> {
-        #[cfg(target_os = "linux")]
-        Self::check_and_download_deps_libs(&config.configuration_path()).await?;
-
         let mut b = AnisetteHeaders::get_anisette_headers_provider(config.clone())?;
         let base_headers = b.provider.get_authentication_headers().await?;
 

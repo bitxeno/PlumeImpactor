@@ -132,7 +132,7 @@ dependencies = [
 [[package]]
 name = "android-loader"
 version = "0.2.0"
-source = "git+https://github.com/Dadoum/android-loader?branch=bigger_pages#dfa86501afca7caa23d5ce15322ac7260d857485"
+source = "git+https://github.com/bitxeno/android-loader?branch=bigger_pages#472e28277696350b1b2eaabb3df3e2e9658c6157"
 dependencies = [
  "anyhow",
  "lazy_static",
@@ -5120,7 +5120,7 @@ dependencies = [
 [[package]]
 name = "omnisette"
 version = "0.1.0"
-source = "git+https://github.com/PlumeImpactor/omnisette?rev=c066ac2#c066ac2bba09d01ba74c7d1c518b994298cb871c"
+source = "git+https://github.com/bitxeno/omnisette?branch=patch#eb815446688cf2ca00bf9d3187ef49ad61fe3d67"
 dependencies = [
  "android-loader",
  "anyhow",
@@ -7452,7 +7452,7 @@ dependencies = [
 [[package]]
 name = "sysv64"
 version = "0.1.0"
-source = "git+https://github.com/Dadoum/android-loader?branch=bigger_pages#dfa86501afca7caa23d5ce15322ac7260d857485"
+source = "git+https://github.com/bitxeno/android-loader?branch=bigger_pages#472e28277696350b1b2eaabb3df3e2e9658c6157"
 
 [[package]]
 name = "tap"
