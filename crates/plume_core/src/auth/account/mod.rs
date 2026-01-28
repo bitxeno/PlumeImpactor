@@ -15,20 +15,36 @@ pub async fn parse_response(
 ) -> Result<plist::Dictionary, Error> {
     let res = res?;
     let status = res.status();
-    let url = res.url().clone();
-    let body = res.text().await?;
-
-    let dict: plist::Dictionary = plist::from_bytes(body.as_bytes()).map_err(|e| {
-        eprintln!(
-            "Failed to parse plist response. Status: {}, URL: {}, Body: {}",
-            status,
-            url,
-            body.chars().take(200).collect::<String>()
+    let res = res.text().await?;
+    if !status.is_success() {
+        let mut error = plist::Dictionary::new();
+        error.insert(
+            "ec".to_string(),
+            plist::Value::Integer(status.as_u16().into()),
         );
-        e
-    })?;
 
-    let res: plist::Value = dict.get("Response").ok_or(crate::Error::Parse)?.to_owned();
+        // Try to extract the HTML <title> from the response body to use as the error message.
+        let mut em_msg = "Possibly triggered Apple's risk control.".to_string();
+        if let Some(start_tag) = res.find("<title") {
+            if let Some(gt_pos) = res[start_tag..].find('>') {
+                let content_start = start_tag + gt_pos + 1;
+                if content_start < res.len() {
+                    if let Some(end_rel) = res[content_start..].find("</title>") {
+                        let end = content_start + end_rel;
+                        let title = res[content_start..end].trim().to_string();
+                        if !title.is_empty() {
+                            em_msg = format!("{}. {}", title, em_msg);
+                        }
+                    }
+                }
+            }
+        }
+
+        error.insert("em".to_string(), plist::Value::String(em_msg));
+        return Ok(error);
+    }
+    let res: plist::Dictionary = plist::from_bytes(res.as_bytes())?;
+    let res: plist::Value = res.get("Response").unwrap().to_owned();
     match res {
         plist::Value::Dictionary(dict) => Ok(dict),
         _ => Err(crate::Error::Parse),
