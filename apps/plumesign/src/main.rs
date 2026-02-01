@@ -2,15 +2,28 @@ mod commands;
 
 use std::{
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
+use chrono::Local;
 use clap::Parser;
 use commands::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "[{} {:<5} {}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.module_path().unwrap_or("<unknown>"),
+                record.args()
+            )
+        })
+        .init();
     _ = rustls::crypto::ring::default_provider()
         .install_default()
         .unwrap();

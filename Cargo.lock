@@ -3628,7 +3628,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "idevice"
 version = "0.1.51"
-source = "git+https://github.com/bitxeno/idevice?branch=wireless_pairing#f7354646a358ec64cc0c75d57b03c873e55832c1"
+source = "git+https://github.com/bitxeno/idevice?branch=wireless_pairing#07608b8ed3b6558bafd5026a6ce218499b24460e"
 dependencies = [
  "async-stream",
  "async_zip",
@@ -5717,6 +5717,7 @@ name = "plumesign"
 version = "2.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dialoguer",
  "env_logger",
