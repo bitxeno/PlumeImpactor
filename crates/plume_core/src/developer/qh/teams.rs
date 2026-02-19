@@ -40,7 +40,7 @@ pub struct Team {
     current_team_member: TeamMember,
     date_created: Option<Date>,
     xcode_free_only: bool,
-    team_provisioning_settings: TeamProvisionSettings,
+    team_provisioning_settings: Option<TeamProvisionSettings>,
 }
 
 #[allow(dead_code)]
