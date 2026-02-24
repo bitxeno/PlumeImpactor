@@ -160,10 +160,17 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     };
 
     if let Some((session, team_id)) = team_id_opt {
-        log::info!("Sign with team ID: {}", team_id);
         signer
             .modify_bundle(&bundle, &Some(team_id.clone()))
             .await?;
+
+        if let Some(ref dev) = device {
+            log::info!("Registering device: {} ({})", dev.name, dev.udid);
+            let device_type = DeviceType::from_string(&dev.name);
+            session
+                .qh_ensure_device(&team_id, &dev.name, &dev.udid, Some(device_type))
+                .await?;
+        }
 
         if args.refresh {
             signer
@@ -179,14 +186,6 @@ pub async fn execute(args: SignArgs) -> Result<()> {
                 log::info!("Installation complete!");
             }
         } else {
-            if let Some(ref dev) = device {
-                log::info!("Registering device: {} ({})", dev.name, dev.udid);
-                let device_type = DeviceType::from_string(&dev.name);
-                session
-                    .qh_ensure_device(&team_id, &dev.name, &dev.udid, Some(device_type))
-                    .await?;
-            }
-
             signer
                 .register_bundle(&bundle, &session, &team_id, false)
                 .await?;
