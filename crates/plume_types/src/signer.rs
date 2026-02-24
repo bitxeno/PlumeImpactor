@@ -5,7 +5,7 @@ use tokio::fs;
 
 use plume_core::{
     CertificateIdentity, MobileProvision, SettingsScope, SigningSettings, UnifiedSigner,
-    developer::DeveloperSession,
+    developer::{DeveloperSession, qh::devices::DeviceType},
 };
 
 use crate::{Bundle, BundleType, Error, PlistInfoTrait, SignerApp, SignerMode, SignerOptions};
@@ -211,7 +211,9 @@ impl Signer {
             return Ok(());
         }
 
-        let platform = bundle.get_platform_name();
+        let device_type = bundle
+            .get_platform_name()
+            .map(|p| DeviceType::from_string(&p));
         let bundles = bundle
             .collect_bundles_sorted()?
             .into_iter()
@@ -229,7 +231,7 @@ impl Signer {
             let session = session_arc.clone();
             let team_id = team_id_arc.clone();
             let signer_settings = signer_settings.clone();
-            let platform = platform.clone();
+            let device_type = device_type.clone();
 
             if signer_settings.embedding.single_profile
                 && sub_bundle.bundle_dir() != bundle.bundle_dir()
@@ -304,7 +306,7 @@ impl Signer {
                 }
 
                 let profiles = session
-                    .qh_get_profile(&team_id, &app_id_id.app_id_id, platform.as_ref())
+                    .qh_get_profile(&team_id, &app_id_id.app_id_id, device_type)
                     .await?;
                 let profile_data = profiles.provisioning_profile.encoded_profile;
 
