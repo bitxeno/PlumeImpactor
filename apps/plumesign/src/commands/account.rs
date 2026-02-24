@@ -117,6 +117,9 @@ pub struct RegisterDeviceArgs {
 
 #[derive(Debug, Args)]
 pub struct DeleteDeviceArgs {
+    /// Apple ID email
+    #[arg(short = 'u', long = "username", value_name = "EMAIL")]
+    pub username: Option<String>,
     /// Team ID to delete device from
     #[arg(short = 't', long = "team", value_name = "TEAM_ID")]
     pub team_id: Option<String>,
@@ -362,7 +365,7 @@ async fn register_device(args: RegisterDeviceArgs) -> Result<()> {
 }
 
 async fn delete_device(args: DeleteDeviceArgs) -> Result<()> {
-    let session = get_authenticated_account(None).await?;
+    let session = get_authenticated_account(args.username).await?;
 
     let team_id = if args.team_id.is_none() {
         teams(&session).await?
