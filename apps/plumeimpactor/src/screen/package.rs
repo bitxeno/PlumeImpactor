@@ -1,5 +1,5 @@
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+    button, checkbox, column, container, image, pick_list, row, scrollable, stack, text, text_input,
 };
 use iced::{Alignment, Center, Element, Fill, Task};
 use plume_utils::{Package, PlistInfoTrait, SignerInstallMode, SignerMode, SignerOptions};
@@ -25,6 +25,10 @@ pub enum Message {
     AddTweak,
     AddBundle,
     RemoveTweak(usize),
+    SetCustomIcon,
+    ClearCustomIcon,
+    SetCustomEntitlements,
+    ClearCustomEntitlements,
     Back,
     RequestInstallation,
 }
@@ -172,6 +176,38 @@ impl PackageScreen {
                 }
                 Task::none()
             }
+            Message::SetCustomIcon => {
+                let path = rfd::FileDialog::new()
+                    .add_filter("Image files", &["png", "jpg", "jpeg"])
+                    .set_title("Select App Icon")
+                    .pick_file();
+
+                if let Some(path) = path {
+                    self.options.custom_icon = Some(path);
+                }
+
+                Task::none()
+            }
+            Message::ClearCustomIcon => {
+                self.options.custom_icon = None;
+                Task::none()
+            }
+            Message::SetCustomEntitlements => {
+                let path = rfd::FileDialog::new()
+                    .add_filter("Entitlements plist", &["plist", "xml"])
+                    .set_title("Select Entitlements File")
+                    .pick_file();
+
+                if let Some(path) = path {
+                    self.options.custom_entitlements = Some(path);
+                }
+
+                Task::none()
+            }
+            Message::ClearCustomEntitlements => {
+                self.options.custom_entitlements = None;
+                Task::none()
+            }
             _ => Task::none(),
         }
     }
@@ -213,13 +249,20 @@ impl PackageScreen {
         let pkg_ver = pkg.get_version().unwrap_or_default();
 
         column![
-            text("Name:").size(12),
-            text_input(
-                "App name",
-                self.options.custom_name.as_ref().unwrap_or(&pkg_name)
-            )
-            .on_input(Message::UpdateCustomName)
-            .padding(8),
+            row![
+                self.view_custom_icon(),
+                column![
+                    text("Name:").size(12),
+                    text_input(
+                        "App name",
+                        self.options.custom_name.as_ref().unwrap_or(&pkg_name)
+                    )
+                    .on_input(Message::UpdateCustomName)
+                    .padding(8),
+                ]
+                .spacing(8),
+            ]
+            .spacing(8),
             text("Identifier:").size(12),
             text_input(
                 "Bundle identifier",
@@ -234,6 +277,9 @@ impl PackageScreen {
             )
             .on_input(Message::UpdateCustomVersion)
             .padding(8),
+            text("Entitlements:").size(12),
+            self.view_custom_entitlements(),
+            text("Only available if \"Only Register Main Bundle\" is enabled.").size(11),
             text("Tweaks:").size(12),
             self.view_tweaks(),
             row![
@@ -333,6 +379,96 @@ impl PackageScreen {
         )
         .width(Fill)
         .into()
+    }
+
+    fn view_custom_entitlements(&self) -> Element<'_, Message> {
+        let enabled = self.options.embedding.single_profile;
+
+        let ent_name = self
+            .options
+            .custom_entitlements
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("No entitlements file");
+
+        let label_color = if enabled {
+            iced::Color::WHITE
+        } else {
+            iced::Color::from_rgb(0.5, 0.5, 0.5)
+        };
+
+        row![
+            text(ent_name).size(12).width(Fill).color(label_color),
+            button(appearance::icon(appearance::PLUS))
+                .on_press_maybe(enabled.then_some(Message::SetCustomEntitlements))
+                .style(appearance::s_button),
+            button(appearance::icon(appearance::MINUS))
+                .on_press_maybe(
+                    (enabled && self.options.custom_entitlements.is_some())
+                        .then_some(Message::ClearCustomEntitlements)
+                )
+                .style(appearance::s_button)
+                .padding(6),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    fn view_custom_icon(&self) -> Element<'_, Message> {
+        let has_custom = self.options.custom_icon.is_some();
+
+        const ICON_SIZE: f32 = 56.0;
+
+        let loading_indicator = container(text("⏳"))
+            .width(ICON_SIZE)
+            .height(ICON_SIZE)
+            .align_x(Center)
+            .align_y(Center);
+
+        let preview: Element<'_, Message> = if let Some(path) = &self.options.custom_icon {
+            stack![
+                loading_indicator,
+                image(image::Handle::from_path(path))
+                    .width(ICON_SIZE)
+                    .height(ICON_SIZE)
+                    .border_radius(appearance::THEME_CORNER_RADIUS)
+            ]
+            .into()
+        } else if let Some(data) = self
+            .selected_package
+            .as_ref()
+            .and_then(|p| p.app_icon_data.as_deref())
+        {
+            stack![
+                loading_indicator,
+                image(image::Handle::from_bytes(data.to_vec()))
+                    .width(ICON_SIZE)
+                    .height(ICON_SIZE)
+                    .border_radius(appearance::THEME_CORNER_RADIUS)
+            ]
+            .into()
+        } else {
+            container(text("No icon").size(11))
+                .width(ICON_SIZE)
+                .height(ICON_SIZE)
+                .align_x(Center)
+                .align_y(Center)
+                .into()
+        };
+
+        let on_press = if has_custom {
+            Message::ClearCustomIcon
+        } else {
+            Message::SetCustomIcon
+        };
+
+        button(preview)
+            .on_press(on_press)
+            .style(appearance::s_button)
+            .padding(0)
+            .into()
     }
 
     fn view_tweaks(&self) -> Element<'_, Message> {

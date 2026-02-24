@@ -1,5 +1,5 @@
 use super::{Bundle, PlistInfoTrait};
-use crate::{Error, SignerApp, SignerOptions};
+use crate::{Error, SignerApp, SignerOptions, cgbi};
 use plist::Dictionary;
 use std::path::PathBuf;
 use std::{env, fs, io::Read};
@@ -14,6 +14,7 @@ pub struct Package {
     stage_payload_dir: PathBuf,
     info_plist_dictionary: Dictionary,
     archive_entries: Vec<String>,
+    pub app_icon_data: Option<Vec<u8>>,
 }
 
 impl Package {
@@ -36,12 +37,19 @@ impl Package {
         let info_plist_dictionary =
             Self::get_info_plist_from_archive(&out_package_file, &archive_entries)?;
 
+        let app_icon_data = Self::extract_icon_from_archive(
+            &out_package_file,
+            &archive_entries,
+            &info_plist_dictionary,
+        );
+
         Ok(Self {
             package_file: out_package_file,
             stage_dir: stage_dir.clone(),
             stage_payload_dir: stage_dir.join("Payload"),
             info_plist_dictionary,
             archive_entries,
+            app_icon_data,
         })
     }
 
@@ -70,6 +78,88 @@ impl Package {
         plist_file.read_to_end(&mut plist_data)?;
 
         Ok(plist::from_bytes(&plist_data)?)
+    }
+
+    fn extract_icon_from_archive(
+        archive_path: &PathBuf,
+        archive_entries: &[String],
+        plist: &Dictionary,
+    ) -> Option<Vec<u8>> {
+        // Collects all candidate icon base names from the plist, in order of preference.
+        // CFBundleIcons (iPhone) takes priority, fall back to CFBundleIcons~ipad, then
+        // top-level CFBundleIconFiles.
+        let mut icon_names: Vec<String> = Vec::new();
+
+        let primary_from = |d: &Dictionary| -> Vec<String> {
+            d.get("CFBundlePrimaryIcon")
+                .and_then(|v| v.as_dictionary())
+                .and_then(|d| d.get("CFBundleIconFiles"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_string())
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+
+        if let Some(d) = plist.get("CFBundleIcons").and_then(|v| v.as_dictionary()) {
+            icon_names.extend(primary_from(d));
+        }
+        if let Some(d) = plist
+            .get("CFBundleIcons~ipad")
+            .and_then(|v| v.as_dictionary())
+        {
+            for n in primary_from(d) {
+                if !icon_names.contains(&n) {
+                    icon_names.push(n);
+                }
+            }
+        }
+        if let Some(arr) = plist.get("CFBundleIconFiles").and_then(|v| v.as_array()) {
+            for n in arr
+                .iter()
+                .filter_map(|v| v.as_string())
+                .map(|s| s.to_string())
+            {
+                if !icon_names.contains(&n) {
+                    icon_names.push(n);
+                }
+            }
+        }
+
+        if icon_names.is_empty() {
+            return None;
+        }
+
+        let app_prefix = archive_entries
+            .iter()
+            .find(|e| {
+                e.starts_with("Payload/")
+                    && e.ends_with("/Info.plist")
+                    && e.matches('/').count() == 2
+            })?
+            .trim_end_matches("/Info.plist");
+
+        let file = fs::File::open(archive_path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+
+        let suffixes = ["@3x.png", "@2x.png", "@1x.png", ".png"];
+
+        for name in &icon_names {
+            for suffix in &suffixes {
+                let candidate = format!("{app_prefix}/{name}{suffix}");
+                if let Ok(mut entry) = archive.by_name(&candidate) {
+                    let mut data = Vec::new();
+                    if entry.read_to_end(&mut data).is_ok() && !data.is_empty() {
+                        return Some(cgbi::normalize(data));
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     pub fn get_package_bundle(&self) -> Result<Bundle, Error> {

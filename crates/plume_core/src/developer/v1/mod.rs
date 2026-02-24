@@ -1,5 +1,6 @@
 pub mod app_ids;
 pub mod capabilities;
+pub mod certs;
 
 use serde::Deserialize;
 

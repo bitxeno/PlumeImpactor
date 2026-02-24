@@ -20,7 +20,7 @@ use crate::{
     developer::{DeveloperSession, qh::certs::Cert},
 };
 
-const MACHINE_NAME: &str = "AltStore";
+pub(crate) const MACHINE_NAME: &str = "AltStore";
 
 pub struct CertificateIdentity {
     pub cert: Option<CapturedX509Certificate>,

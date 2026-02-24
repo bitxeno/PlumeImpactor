@@ -7,7 +7,11 @@
 
 Open-source, cross-platform, and feature rich iOS sideloading application. Supporting macOS, Linux[^1], and Windows[^2].
 
-[^1]: On Linux, usbmuxd must be installed on your system. Don't worry though, it comes with most popular distributions by default already! However, due to some distributions [udev](https://man7.org/linux/man-pages/man7/udev.7.html) rules `usbmuxd` may stop running after no devices are connected causing Impactor to not detect the device after plugging it in. You can mitigate this by plugging your phone first then restarting the app.
+[^1]: On Linux, usbmuxd must be installed on your system. Don't worry though, it comes with most popular distributions by default already! However, due to some distributions [udev](https://man7.org/linux/man-pages/man7/udev.7.html) rules `usbmuxd` may stop running after no devices are connected causing Impactor to not detect the device after plugging it in. You can mitigate this by plugging your phone first then restarting the app. \
+\
+Auto-refresh will not work the same as it would on other platforms like macOS/Windows, due to `usbmuxd` lacking WiFi connectivity so it will attempt to do it automatically only when a device is plugged in, we are looking for a proper solution though.\
+\
+Some distributions (like Bazzite) may need you to run `sudo update-crypto-policies` so `usbmuxd` ends up detecting the device again.
 
 [^2]: On Windows, [iTunes](https://support.apple.com/en-us/106372) must be downloaded so Impactor is able to use the drivers for interacting with Apple devices.
 
@@ -16,6 +20,7 @@ Open-source, cross-platform, and feature rich iOS sideloading application. Suppo
 ### Features
 
 - User friendly and clean UI.
+- Supports installing [SideStore](https://github.com/SideStore/SideStore) and [LiveContainer](https://github.com/LiveContainer/LiveContainer) properly.
 - Supports Linux.
 - Sign and sideload applications on iOS 9.0+ & Mac with your Apple ID.
   - Installing with [AppSync](https://github.com/akemin-dayo/AppSync) is supported.
@@ -37,6 +42,20 @@ Open-source, cross-platform, and feature rich iOS sideloading application. Suppo
 
 Visit [releases](https://github.com/khcrysalis/PlumeImpactor/releases) and get the latest version for your computer.
 
+###### *This is also available on flatpak & homebrew.*
+
+**Linux:**
+
+<a href="https://flathub.org/en/apps/dev.khcrysalis.PlumeImpactor">
+  <img src="https://dl.flathub.org/assets/badges/flathub-badge-en.svg" width="200px">
+</a>
+
+**macOS:**
+
+```sh
+brew install --cask impactor
+```
+
 ## How it works
 
 How it works is that we try to replicate what [Xcode](https://developer.apple.com/xcode/) would do but in our own application, by using your Apple Account (which serves the purpose of being a "Developer") so we can request certificates, provisioning profiles, and register your device from Apple themselves. 
@@ -55,65 +74,18 @@ That's the entire gist of how this works! Of course its very short and brief, ho
 
 Impactor also allows the user to generate a pairing file for applications to talk directly to the device remotely. This pairing file is device specific and will become invalid if you ever re-trust/update/reset.
 
-Supported apps:
-- `SideStore`
-- `Feather`
-- `SparseBox`
-- `LiveContainer + SideStore`
-- `Antrag`
-- `Protokolle`
-- `StikDebug`
+Supported apps for pairing file:
+- [`SideStore`](https://github.com/SideStore/SideStore): Uses your Apple ID to install iOS apps.
+- [`Feather`](https://github.com/khcrysalis/Feather): Uses raw certificates to install iOS apps.
+- [`SparseBox`](https://github.com/khanhduytran0/SparseBox): Device customizer.
+- [`LiveContainer + SideStore`](https://github.com/LiveContainer/LiveContainer) Uses your Apple ID to install iOS apps.
+- [`Antrag`](https://github.com/khcrysalis/Antrag): List currently installed iOS apps.
+- [`Protokolle`](https://github.com/khcrysalis/Protokolle): View logs from system processes.
+- [`StikDebug`](https://github.com/StephenDev0/StikDebug): Enable JIT for iOS apps.
+- [`EnsWilde`](https://github.com/YangJiiii/EnsWilde): Device customizer.
+- [`ByeTunes`](https://github.com/EduAlexxis/ByeTunes): Import mp3 files to the Music App.
 
 You can retrieve this file by either sideloading the supported app of your choice, or going to the `Utilities` page when a device is connected and press install for the supported app. Head over to the [downloads](https://github.com/khcrysalis/PlumeImpactor/releases).
-
-## Structure
-
-The project is seperated in multiple modules, all serve single or multiple uses depending on their importance.
-
-| Module               | Description                                                                                                                   |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `apps/plumeimpactor` | GUI interface for the crates shown below, backend using wxWidgets (with a rust ffi wrapper, wxDragon).                        |
-| `apps/plumesign`     | Simple CLI interface for signing, using `clap`.                                                                               |
-| `crates/core`.       | Handles all api request used for communicating with Apple developer services, along with providing auth for Apple's grandslam |
-| `crates/gestalt`     | Wrapper for `libMobileGestalt.dylib`, used for obtaining your Mac's UDID for Apple Silicon sideloading.                       |
-| `crates/utils`       | Shared code between GUI and CLI, contains signing and modification logic, and helpers.                                        |
-| `crates/shared`      | Shared code between GUI and CLI, contains keychain functionality and shared datapaths.                                        |
-
-## Building
-
-Building is going to be a bit convoluted for each platform, each having their own unique specifications, but the best reference for building should be looking at how [GitHub actions](./.github/workflows/build.yml) does it.
-
-You need:
-- [Rust](https://rustup.rs/).
-- [CMake](https://cmake.org/download/) (and a c++ compiler).
-
-```sh
-# Building / testing GUI
-cargo run --bin plumeimpactor
-# Building / texting CLI
-cargo run --bin plumesign -- <args>
-```
-
-Extra requirements are shown below for building if you don't have these already, and trust me, it is convoluted.
-
-#### Linux Requirements
-
-```sh
-# Ubuntu/Debian
-sudo apt-get install libclang-dev pkg-config libgtk-3-dev libpng-dev libjpeg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev libexpat1-dev libtiff-dev
-
-# Fedora/RHEL
-sudo dnf install clang-devel pkg-config gtk3-devel libpng-devel libjpeg-devel mesa-libGL-devel mesa-libGLU-devel libxkbcommon-devel expat-devel libtiff-devel
-```
-
-#### macOS Requirements
-
-- [Xcode](https://developer.apple.com/xcode/) or [Command Line Tools](https://developer.apple.com/download/all/).
-
-#### Windows Requirements
-
-- [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022).
-- Windows 10/11 SDK.
 
 ## Sponsors
 
@@ -135,8 +107,10 @@ sudo dnf install clang-devel pkg-config gtk3-devel libpng-devel libjpeg-devel me
 ## Acknowledgements
 
 - [SAMSAM](https://github.com/khcrysalis) – The maker.
+- [Paige](https://github.com/paigely) – Icon & flatpak distribution.
 - [SideStore](https://github.com/SideStore/apple-private-apis) – Grandslam auth & Omnisette.
 - [gms.py](https://gist.github.com/JJTech0130/049716196f5f1751b8944d93e73d3452) – Grandslam auth API references.
+- [isideload](https://github.com/nab138/isideload) - Code for properly grabbing Xcode token.
 - [Sideloader](https://github.com/Dadoum/Sideloader) – Apple Developer API references.
 - [PyDunk](https://github.com/nythepegasus/PyDunk) – `v1` Apple Developer API references.
 - [idevice](https://github.com/jkcoxson/idevice) – Used for communication with `installd`, specifically for sideloading the apps to your devices.

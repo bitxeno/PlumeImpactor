@@ -1,4 +1,5 @@
 mod bundle;
+mod cgbi;
 mod device;
 mod options;
 mod package;
@@ -54,6 +55,8 @@ pub enum Error {
     Codesign(#[from] plume_core::AppleCodesignError),
     #[error("Other error: {0}")]
     Other(String),
+    #[error("Image error: {0}")]
+    Image(#[from] image::ImageError),
 }
 
 pub trait PlistInfoTrait {

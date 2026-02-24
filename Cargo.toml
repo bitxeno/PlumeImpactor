@@ -4,13 +4,14 @@ members = [
     "apps/plumeimpactor",
     "apps/plumesign",
     "crates/plume_core",
-    "crates/plume_gestalt", "crates/plume_store",
-    "crates/plume_types",
+    "crates/plume_gestalt", 
+    "crates/plume_store",
+    "crates/plume_utils",
 ]
 
 [workspace.package]
 edition = "2024"
-version = "2.0.0"
+version = "2.1.0"
 authors = ["khcrysalis <s03781614@icloud.com>"]
 license = "MIT"
 repository = "https://github.com/khcrysalis/plumestore"
@@ -32,15 +33,23 @@ incremental = true          # Improves re-compile times
 tokio = { version = "1.43", features = ["full"] }
 # Application
 idevice = { git = "https://github.com/bitxeno/idevice", branch = "wireless_pairing", features = [
-    "full"
+    "full",
+    "ring",
 ] }
 plist = "1.8.0"
-
 # Errors
 env_logger = "0.11.8"
 log = "0.4.28"
 thiserror = "2.0.16"
-
 # Utils
 uuid = "1.18.1"
 futures = "0.3.31"
+chrono = { version = "0.4.42", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+rustls = { version = "0.23.32", default-features = false, features = [
+    "std",
+    "tls12",
+    "ring",
+] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

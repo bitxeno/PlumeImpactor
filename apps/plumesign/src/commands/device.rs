@@ -8,7 +8,7 @@ use idevice::{
     installation_proxy::InstallationProxyClient,
     usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
 };
-use plume_utils::{Device, get_device_for_uuid};
+use plume_utils::{Device, Package, get_device_for_uuid};
 
 #[derive(Debug, Args)]
 #[command(arg_required_else_help = true)]
@@ -68,6 +68,15 @@ pub async fn execute(args: DeviceArgs) -> Result<()> {
     };
 
     if let Some(app_path) = args.install {
+        let mut app_path = app_path;
+
+        if !app_path.is_dir() {
+            app_path = Package::new(app_path)?
+                .get_package_bundle()?
+                .bundle_dir()
+                .clone();
+        }
+
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         if args.mac {
             log::info!("Installing app at {:?} to connected Mac", app_path);
