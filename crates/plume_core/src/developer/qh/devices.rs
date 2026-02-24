@@ -24,6 +24,7 @@ impl DeveloperSession {
         team_id: &String,
         device_name: &String,
         device_udid: &String,
+        device_type: Option<DeviceType>,
     ) -> Result<DeviceResponse, Error> {
         let endpoint = developer_endpoint!("/QH65B2/ios/addDevice.action");
 
@@ -34,6 +35,13 @@ impl DeveloperSession {
             "deviceNumber".to_string(),
             Value::String(device_udid.clone()),
         );
+        if let Some(DeviceType::Tvos) = device_type {
+            body.insert(
+                "DTDK_Platform".to_string(),
+                Value::String("tvos".to_string()),
+            );
+            body.insert("subPlatform".to_string(), Value::String("tvOS".to_string()));
+        }
 
         let response = self.qh_send_request(&endpoint, Some(body)).await?;
         let response_data: DeviceResponse = plist::from_value(&Value::Dictionary(response))?;
@@ -78,12 +86,13 @@ impl DeveloperSession {
         team_id: &String,
         device_name: &String,
         device_udid: &String,
+        device_type: Option<DeviceType>,
     ) -> Result<Device, Error> {
         if let Some(device) = self.qh_get_device(team_id, device_udid).await? {
             Ok(device)
         } else {
             let response = self
-                .qh_add_device(team_id, device_name, device_udid)
+                .qh_add_device(team_id, device_name, device_udid, device_type)
                 .await?;
             Ok(response.device)
         }
@@ -127,4 +136,27 @@ pub struct Device {
     status: String,
     device_class: String,
     expiration_date: Option<Date>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceType {
+    Any,
+    Ios,
+    Tvos,
+    Watchos,
+}
+
+impl DeviceType {
+    pub fn from_string(s: &str) -> Self {
+        let s = s.to_lowercase();
+        if s.contains("iphone") || s.contains("ipad") || s.contains("ios") {
+            Self::Ios
+        } else if s.contains("tvos") || s.contains("apple tv") || s.contains("appletv") {
+            Self::Tvos
+        } else if s.contains("watchos") || s.contains("watch") {
+            Self::Watchos
+        } else {
+            Self::Any
+        }
+    }
 }

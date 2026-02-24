@@ -1,7 +1,7 @@
 use plist::{Data, Date, Dictionary, Value};
 use serde::Deserialize;
 
-use crate::Error;
+use crate::{Error, developer::qh::devices::DeviceType};
 
 use super::{DeveloperSession, QHResponseMeta};
 use crate::developer_endpoint;
@@ -11,7 +11,7 @@ impl DeveloperSession {
         &self,
         team_id: &String,
         app_id_id: &String,
-        platform: Option<&String>,
+        platform: Option<DeviceType>,
     ) -> Result<ProfilesResponse, Error> {
         let endpoint = developer_endpoint!("/QH65B2/ios/downloadTeamProvisioningProfile.action");
 
@@ -19,7 +19,7 @@ impl DeveloperSession {
         body.insert("teamId".to_string(), Value::String(team_id.clone()));
         body.insert("appIdId".to_string(), Value::String(app_id_id.clone()));
 
-        if platform.map_or(false, |s| s.eq_ignore_ascii_case("appletvos")) {
+        if let Some(DeviceType::Tvos) = platform {
             body.insert(
                 "DTDK_Platform".to_string(),
                 Value::String("tvos".to_string()),

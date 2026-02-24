@@ -5,7 +5,11 @@ use anyhow::{Ok, Result};
 use clap::{Args, Subcommand};
 use dialoguer::Select;
 
-use plume_core::{AnisetteConfiguration, auth::Account, developer::DeveloperSession};
+use plume_core::{
+    AnisetteConfiguration,
+    auth::Account,
+    developer::{DeveloperSession, qh::devices::DeviceType},
+};
 use plume_store::AccountStore;
 
 use crate::get_data_path;
@@ -107,6 +111,8 @@ pub struct RegisterDeviceArgs {
     /// Device name
     #[arg(short = 'n', long = "name", value_name = "NAME", required = true)]
     pub name: String,
+    #[arg(long = "platform", value_name = "PLATFORM")]
+    pub platform: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -340,8 +346,13 @@ async fn register_device(args: RegisterDeviceArgs) -> Result<()> {
         args.team_id.unwrap()
     };
 
+    let device_type = args
+        .platform
+        .as_ref()
+        .map(|p| DeviceType::from_string(p))
+        .unwrap_or(DeviceType::Any);
     let p = session
-        .qh_add_device(&team_id, &args.name, &args.udid)
+        .qh_add_device(&team_id, &args.name, &args.udid, Some(device_type))
         .await?
         .device;
 

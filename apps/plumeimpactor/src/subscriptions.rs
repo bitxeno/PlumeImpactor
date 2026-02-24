@@ -287,7 +287,7 @@ pub(crate) async fn run_installation(
 
             if let Some(dev) = &device {
                 session
-                    .qh_ensure_device(team_id, &dev.name, &dev.udid)
+                    .qh_ensure_device(team_id, &dev.name, &dev.udid, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }

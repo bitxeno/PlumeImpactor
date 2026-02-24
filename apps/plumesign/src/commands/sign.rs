@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args;
 
-use plume_core::{CertificateIdentity, MobileProvision};
+use plume_core::{CertificateIdentity, MobileProvision, developer::qh::devices::DeviceType};
 use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
 
 use crate::{
@@ -180,8 +180,9 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         } else {
             if let Some(ref dev) = device {
                 log::info!("Registering device: {} ({})", dev.name, dev.udid);
+                let device_type = DeviceType::from_string(&dev.name);
                 session
-                    .qh_ensure_device(&team_id, &dev.name, &dev.udid)
+                    .qh_ensure_device(&team_id, &dev.name, &dev.udid, Some(device_type))
                     .await?;
             }
 
