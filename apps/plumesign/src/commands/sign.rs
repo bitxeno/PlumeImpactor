@@ -160,6 +160,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     };
 
     if let Some((session, team_id)) = team_id_opt {
+        log::info!("Sign with team ID: {}", team_id);
         signer
             .modify_bundle(&bundle, &Some(team_id.clone()))
             .await?;
