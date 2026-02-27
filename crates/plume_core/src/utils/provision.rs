@@ -5,6 +5,7 @@ use crate::Error;
 use crate::utils::TEAM_ID_REGEX;
 use plist::{Date, Dictionary, Value};
 
+#[cfg(feature = "tweaks")]
 use super::MachO;
 
 #[derive(Clone)]
@@ -32,6 +33,7 @@ impl MobileProvision {
         })
     }
 
+    #[cfg(feature = "tweaks")]
     pub fn merge_entitlements(
         &mut self,
         binary_path: PathBuf,

@@ -1,8 +1,10 @@
-name: "Release"
+name: Release
+
 on:
   push:
+    tags:
+      - v*
   workflow_dispatch:
-
 env:
   BINARY_NAME: plumeimpactor
   BINARY_NAME_CLI: plumesign
@@ -35,6 +37,7 @@ jobs:
 
       - name: Build binaries
         run: |
+          cargo test -p plume_core --test crypto
           make linux PROFILE=release
 
       - name: Upload binaries
