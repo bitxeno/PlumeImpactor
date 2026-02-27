@@ -6,7 +6,9 @@ pub use apple_codesign::{AppleCodesignError, SettingsScope, SigningSettings, Uni
 
 pub use omnisette::AnisetteConfiguration;
 
-pub use utils::{CertificateIdentity, MachO, MachOExt, MobileProvision};
+pub use utils::{CertificateIdentity, MobileProvision};
+#[cfg(feature = "tweaks")]
+pub use utils::{MachO, MachOExt};
 
 use thiserror::Error as ThisError;
 #[derive(Debug, ThisError)]
