@@ -92,9 +92,15 @@ async fn pairing(args: PairingArgs) -> Result<()> {
 
     let serial_val = lc.get_value(Some("UniqueDeviceID"), None).await?;
     let s_udid = serial_val.as_string().unwrap_or_default().to_string();
+    let wifi_val = lc.get_value(Some("WiFiAddress"), None).await?;
+    let s_wifi = wifi_val.as_string().unwrap_or_default().to_string();
     if args.save {
         if pairing_file.udid.is_none() {
             pairing_file.udid = Some(s_udid.clone());
+        }
+        if !s_wifi.is_empty() && pairing_file.wifi_mac_address != s_wifi {
+            log::info!("Updating pairing file with WiFi MAC address: {}", s_wifi);
+            pairing_file.wifi_mac_address = s_wifi.clone();
         }
 
         log::info!("Saving pairing file for device UDID: {}", s_udid);

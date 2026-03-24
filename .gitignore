@@ -9,3 +9,4 @@
 state.plist
 .zsign_cache
 cargo-sources.json
+.vscode
