@@ -11,10 +11,10 @@ members = [
 
 [workspace.package]
 edition = "2024"
-version = "2.1.0"
-authors = ["khcrysalis <s03781614@icloud.com>"]
+version = "2.2.2"
+authors = ["CLARATION <claration@riseup.net>"]
 license = "MIT"
-repository = "https://github.com/khcrysalis/plumestore"
+repository = "https://github.com/claration/Impactor"
 
 # We use `opt-level = "s"` as it significantly reduces binary size.
 # We could then use the `#[optimize(speed)]` attribute for spot optimizations.
@@ -30,26 +30,30 @@ strip = "symbols"           # See split-debuginfo - allows us to drop the size b
 incremental = true          # Improves re-compile times
 
 [workspace.dependencies]
-tokio = { version = "1.43", features = ["full"] }
+tokio = { version = "1.43", features = ["rt-multi-thread"] }
 # Application
-idevice = { git = "https://github.com/bitxeno/idevice", branch = "wireless_pairing", features = [
+idevice = { git = "https://github.com/bitxeno/idevice", branch = "develop", features = [
     "full",
     "ring",
 ] }
-plist = "1.8.0"
+plist = "1.8"
 # Errors
-env_logger = "0.11.8"
-log = "0.4.28"
-thiserror = "2.0.16"
+env_logger = "0.11"
+log = "0.4"
+thiserror = "2.0"
 # Utils
-uuid = "1.18.1"
-futures = "0.3.31"
-chrono = { version = "0.4.42", features = ["serde"] }
+uuid = "1.18"
+futures = { version = "0.3", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
-rustls = { version = "0.23.32", default-features = false, features = [
+rustls = { version = "0.23", default-features = false, features = [
     "std",
     "tls12",
     "ring",
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+goblin = "0.9"
+
+[patch.crates-io]
+polyval = { git = "https://github.com/bitxeno/universal-hashes", branch = "polyval-patch" }

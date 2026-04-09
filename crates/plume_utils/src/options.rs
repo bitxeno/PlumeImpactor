@@ -213,6 +213,7 @@ impl SignerApp {
             ("com.yangjiii.EnsWilde", SignerApp::EnsWilde),
             ("com.EduAlexxis.MusicManager", SignerApp::ByeTunes),
             ("me.stik.store", SignerApp::StikStore),
+            ("app.stik.store", SignerApp::StikStore),
         ];
 
         for &(known_id, app) in KNOWN_APPS {

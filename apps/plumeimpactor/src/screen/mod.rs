@@ -5,8 +5,10 @@ pub(crate) mod settings;
 mod utilties;
 mod windows;
 
+use std::collections::VecDeque;
+
 use iced::Length::Fill;
-use iced::widget::{button, container, pick_list, row, text};
+use iced::widget::{button, column, container, pick_list, row, stack, text};
 use iced::window;
 use iced::{Element, Subscription, Task};
 
@@ -43,6 +45,8 @@ pub enum Message {
     TrayIconClicked,
     #[cfg(target_os = "linux")]
     GtkTick,
+    #[cfg(target_os = "macos")]
+    MacOsActivationTick,
 
     // Refresh operations
     RefreshAppNow {
@@ -56,6 +60,7 @@ pub enum Message {
     UpdateTrayMenu,
 
     // Window management
+    RelaunchRequested,
     ShowWindow,
     HideWindow,
     Quit,
@@ -69,6 +74,9 @@ pub enum Message {
     SettingsScreen(settings::Message),
     InstallerScreen(package::Message),
     ProgressScreen(progress::Message),
+    CertificateResetRequested(crate::certificate_reset::ConfirmationRequest),
+    ConfirmCertificateReset,
+    CancelCertificateReset,
 
     // Installation
     StartInstallation,
@@ -84,6 +92,7 @@ pub struct Impactor {
     account_store: Option<AccountStore>,
     login_windows: std::collections::HashMap<window::Id, login_window::LoginWindow>,
     pending_installation: bool,
+    certificate_reset_queue: VecDeque<crate::certificate_reset::ConfirmationRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +124,8 @@ impl Impactor {
             let (id, open_task) = window::open(defaults::default_window_settings());
             (Some(id), open_task.discard())
         };
+        crate::macos_app::set_main_window_visible(true);
+        crate::macos_app::reset_activation_state();
 
         (
             Self {
@@ -127,6 +138,7 @@ impl Impactor {
                 account_store: Some(store),
                 login_windows: std::collections::HashMap::new(),
                 pending_installation: false,
+                certificate_reset_queue: VecDeque::new(),
             },
             open_task,
         )
@@ -135,6 +147,18 @@ impl Impactor {
     fn init_account_store_sync() -> AccountStore {
         let path = defaults::get_data_path().join("accounts.json");
         AccountStore::load_sync(&Some(path)).unwrap_or_default()
+    }
+
+    fn respond_to_next_certificate_reset(&mut self, accepted: bool) {
+        if let Some(request) = self.certificate_reset_queue.pop_front() {
+            request.respond(accepted);
+        }
+    }
+
+    fn cancel_pending_certificate_resets(&mut self) {
+        while let Some(request) = self.certificate_reset_queue.pop_front() {
+            request.respond(false);
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -147,10 +171,16 @@ impl Impactor {
                     .cloned();
 
                 if let ImpactorScreen::Utilities(_) = self.current_screen {
+                    let rppairing_enabled = match &self.current_screen {
+                        ImpactorScreen::Utilities(screen) => screen.rppairing_enabled,
+                        _ => false,
+                    };
                     self.current_screen = ImpactorScreen::Utilities(
                         utilties::UtilitiesScreen::new(self.selected_device.clone()),
                     );
-                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps));
+                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps(
+                        rppairing_enabled,
+                    )));
                 }
 
                 Task::none()
@@ -171,10 +201,16 @@ impl Impactor {
                 }
 
                 if let ImpactorScreen::Utilities(_) = self.current_screen {
+                    let rppairing_enabled = match &self.current_screen {
+                        ImpactorScreen::Utilities(screen) => screen.rppairing_enabled,
+                        _ => false,
+                    };
                     self.current_screen = ImpactorScreen::Utilities(
                         utilties::UtilitiesScreen::new(self.selected_device.clone()),
                     );
-                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps));
+                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps(
+                        rppairing_enabled,
+                    )));
                 }
 
                 Task::none()
@@ -199,10 +235,16 @@ impl Impactor {
                 }
 
                 if let ImpactorScreen::Utilities(_) = self.current_screen {
+                    let rppairing_enabled = match &self.current_screen {
+                        ImpactorScreen::Utilities(screen) => screen.rppairing_enabled,
+                        _ => false,
+                    };
                     self.current_screen = ImpactorScreen::Utilities(
                         utilties::UtilitiesScreen::new(self.selected_device.clone()),
                     );
-                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps));
+                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps(
+                        rppairing_enabled,
+                    )));
                 }
 
                 Task::none()
@@ -220,7 +262,13 @@ impl Impactor {
                 self.navigate_to_screen(screen_type.clone());
 
                 if screen_type == ImpactorScreenType::Utilities {
-                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps));
+                    let rppairing_enabled = match &self.current_screen {
+                        ImpactorScreen::Utilities(screen) => screen.rppairing_enabled,
+                        _ => false,
+                    };
+                    return Task::done(Message::UtilitiesScreen(utilties::Message::RefreshApps(
+                        rppairing_enabled,
+                    )));
                 }
 
                 Task::none()
@@ -292,7 +340,39 @@ impl Impactor {
                 while gtk::glib::MainContext::default().iteration(false) {}
                 Task::none()
             }
+            #[cfg(target_os = "macos")]
+            Message::MacOsActivationTick => {
+                if self.main_window.is_none() && crate::macos_app::activation_reopen_requested() {
+                    Task::done(Message::RelaunchRequested)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::RelaunchRequested => {
+                if self.main_window.is_none() {
+                    Task::done(Message::ShowWindow)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::CertificateResetRequested(request) => {
+                self.certificate_reset_queue.push_back(request);
+                if self.main_window.is_none() {
+                    Task::done(Message::ShowWindow)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::ConfirmCertificateReset => {
+                self.respond_to_next_certificate_reset(true);
+                Task::none()
+            }
+            Message::CancelCertificateReset => {
+                self.respond_to_next_certificate_reset(false);
+                Task::none()
+            }
             Message::ShowWindow => {
+                crate::macos_app::set_main_window_visible(true);
                 if let Some(id) = self.main_window {
                     window::gain_focus(id)
                 } else {
@@ -303,7 +383,9 @@ impl Impactor {
             }
             Message::HideWindow => {
                 if let Some(id) = self.main_window {
+                    self.cancel_pending_certificate_resets();
                     self.main_window = None;
+                    crate::macos_app::set_main_window_visible(false);
                     window::close(id)
                 } else {
                     Task::none()
@@ -362,11 +444,15 @@ impl Impactor {
                             package::PackageScreen::new(Some(package), options),
                         );
                     } else if let general::Message::NavigateToUtilities = msg {
+                        let rppairing_enabled = match &self.current_screen {
+                            ImpactorScreen::Utilities(screen) => screen.rppairing_enabled,
+                            _ => false,
+                        };
                         self.current_screen = ImpactorScreen::Utilities(
                             utilties::UtilitiesScreen::new(self.selected_device.clone()),
                         );
                         return Task::done(Message::UtilitiesScreen(
-                            utilties::Message::RefreshApps,
+                            utilties::Message::RefreshApps(rppairing_enabled),
                         ));
                     }
 
@@ -700,6 +786,8 @@ impl Impactor {
             };
 
         let tray_menu_refresh_subscription = subscriptions::tray_menu_refresh_subscription();
+        let certificate_reset_subscription = subscriptions::certificate_reset_subscription();
+        let relaunch_subscription = subscriptions::relaunch_subscription();
 
         let close_subscription = iced::event::listen_with(|event, _status, _id| {
             if let iced::Event::Window(window::Event::CloseRequested) = event {
@@ -714,13 +802,13 @@ impl Impactor {
             hover_subscription,
             progress_subscription,
             tray_menu_refresh_subscription,
+            certificate_reset_subscription,
+            relaunch_subscription,
             close_subscription,
         ])
     }
 
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
-        use iced::widget::{column, container};
-
         if let Some(login_window) = self.login_windows.get(&window_id) {
             return login_window
                 .view()
@@ -730,10 +818,16 @@ impl Impactor {
         let has_device = self.selected_device.is_some();
         let screen_content = self.view_current_screen(has_device);
         let top_bar = self.view_top_bar();
+        let base: Element<'_, Message> =
+            container(column(vec![top_bar, screen_content]).spacing(appearance::THEME_PADDING))
+                .padding(appearance::THEME_PADDING)
+                .into();
 
-        container(column(vec![top_bar, screen_content]).spacing(appearance::THEME_PADDING))
-            .padding(appearance::THEME_PADDING)
-            .into()
+        if self.certificate_reset_queue.front().is_some() {
+            stack![base, self.view_certificate_reset_prompt()].into()
+        } else {
+            base
+        }
     }
 
     fn view_current_screen(&self, has_device: bool) -> Element<'_, Message> {
@@ -789,6 +883,57 @@ impl Impactor {
         )
         .width(Fill)
         .into()
+    }
+
+    fn view_certificate_reset_prompt(&self) -> Element<'_, Message> {
+        let Some(request) = self.certificate_reset_queue.front() else {
+            return container(text("")).into();
+        };
+
+        let actions = row![
+            button(text("Cancel"))
+                .on_press(Message::CancelCertificateReset)
+                .style(appearance::s_button),
+            button(text("Continue"))
+                .on_press(Message::ConfirmCertificateReset)
+                .style(appearance::p_button),
+        ]
+        .spacing(appearance::THEME_PADDING);
+
+        let dialog = container(
+            column![
+                text("Certificate reset required").size(appearance::THEME_FONT_SIZE + 2.0),
+                text(&request.message),
+                actions,
+            ]
+            .spacing(appearance::THEME_PADDING),
+        )
+        .padding(appearance::THEME_PADDING * 2.0)
+        .max_width(420.0)
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(theme.palette().background)),
+            border: iced::Border {
+                width: 1.0,
+                color: theme.palette().warning,
+                radius: appearance::THEME_CORNER_RADIUS.into(),
+            },
+            ..Default::default()
+        });
+
+        container(dialog)
+            .width(Fill)
+            .height(Fill)
+            .center(Fill)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.45,
+                })),
+                ..Default::default()
+            })
+            .into()
     }
 
     fn navigate_to_screen(&mut self, screen_type: ImpactorScreenType) {

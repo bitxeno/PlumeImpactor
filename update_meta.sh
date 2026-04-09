@@ -4,7 +4,7 @@ set -euo pipefail
 # ------------------------------------------------------------
 # Config
 # ------------------------------------------------------------
-REPO="khcrysalis/Impactor"
+REPO="claration/Impactor"
 API="https://api.github.com/repos/$REPO/releases"
 OUT_DIR="upload"
 OUT_FILE="$OUT_DIR/dev.khcrysalis.PlumeImpactor.metainfo.xml"

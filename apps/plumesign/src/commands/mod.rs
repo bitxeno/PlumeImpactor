@@ -37,7 +37,7 @@ pub enum Commands {
     Device(device::DeviceArgs),
     /// List connected devices (udid, id, name)
     DeviceId(device_id::DeviceIdArgs),
-    /// Pair a device (wired or wireless)
+    /// Pair a device over network (IP/port)
     Pair(pair::PairArgs),
     /// Check PublicStaging via AFC and list files
     Check(check::CheckArgs),

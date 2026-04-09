@@ -103,25 +103,32 @@ impl Signer {
                         .into_iter()
                         .collect::<Vec<_>>();
 
+                    let id_key = match self.options.app {
+                        SignerApp::StikStore => "MachineID",
+                        _ => "ALTCertificateID",
+                    };
+                    let cert_file_name = match self.options.app {
+                        SignerApp::StikStore => "Certificate.p12",
+                        _ => "ALTCertificate.p12",
+                    };
+
                     match self.options.app {
                         SignerApp::LiveContainerAndSideStore => {
                             if let Some(embedded_bundle) = bundles
                                 .iter()
                                 .find(|b| b.bundle_dir().ends_with("SideStoreApp.framework"))
                             {
-                                embedded_bundle
-                                    .set_info_plist_key("ALTCertificateID", &**serial_number)?;
+                                embedded_bundle.set_info_plist_key(id_key, &**serial_number)?;
                                 fs::write(
-                                    embedded_bundle.bundle_dir().join("ALTCertificate.p12"),
+                                    embedded_bundle.bundle_dir().join(cert_file_name),
                                     p12_data,
                                 )
                                 .await?;
                             }
                         }
                         SignerApp::SideStore | SignerApp::AltStore => {
-                            bundle.set_info_plist_key("ALTCertificateID", &**serial_number)?;
-                            fs::write(bundle.bundle_dir().join("ALTCertificate.p12"), p12_data)
-                                .await?;
+                            bundle.set_info_plist_key(id_key, &**serial_number)?;
+                            fs::write(bundle.bundle_dir().join(cert_file_name), p12_data).await?;
                         }
                         _ => {}
                     }
@@ -332,7 +339,11 @@ impl Signer {
 
                 if let Some(app_groups) = macho.app_groups_for_entitlements() {
                     let mut app_group_ids: Vec<String> = Vec::new();
+
                     for group in &app_groups {
+                        if !group.starts_with("group.") {
+                            continue;
+                        }
                         let mut group_name = format!("{group}.{team_id}");
 
                         if is_refresh {
@@ -343,6 +354,15 @@ impl Signer {
                             .await?;
                         app_group_ids.push(group_id.application_group);
                     }
+
+                    let default_group = format!("group.{}.{}", id, team_id);
+                    if !app_group_ids.contains(&default_group) {
+                        let default_group_id = session
+                            .qh_ensure_app_group(&team_id, &default_group, &default_group)
+                            .await?;
+                        app_group_ids.push(default_group_id.application_group);
+                    }
+
                     if !is_refresh {
                         if signer_settings.app == SignerApp::SideStore
                             || signer_settings.app == SignerApp::AltStore

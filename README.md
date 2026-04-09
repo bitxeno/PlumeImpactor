@@ -1,9 +1,9 @@
 # <img src="https://github.com/user-attachments/assets/18f2eff4-546f-4365-98eb-afb19b13dc13" width="25" height="25" /> Impactor
 
-[![GitHub Release](https://img.shields.io/github/v/release/khcrysalis/PlumeImpactor?include_prereleases)](https://github.com/khcrysalis/PlumeImpactor/releases)
-[![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/khcrysalis/PlumeImpactor/total)](https://github.com/khcrysalis/PlumeImpactor/releases)
-[![GitHub License](https://img.shields.io/github/license/khcrysalis/PlumeImpactor?color=%23C96FAD)](https://github.com/khcrysalis/PlumeImpactor/blob/main/LICENSE)
-[![Sponsor Me](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/khcrysalis)
+[![GitHub Release](https://img.shields.io/github/v/release/claration/Impactor?include_prereleases)](https://github.com/claration/Impactor/releases)
+[![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/claration/Impactor/total)](https://github.com/claration/Impactor/releases)
+[![GitHub License](https://img.shields.io/github/license/claration/Impactor?color=%23C96FAD)](https://github.com/claration/Impactor/blob/main/LICENSE)
+[![Sponsor Me](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/claration)
 
 Open-source, cross-platform, and feature rich iOS sideloading application. Supporting macOS, Linux[^1], and Windows[^2].
 

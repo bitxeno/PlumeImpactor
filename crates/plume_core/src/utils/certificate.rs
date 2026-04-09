@@ -59,6 +59,7 @@ impl CertificateIdentity {
         machine_name: Option<String>,
         team_id: &String,
         is_export: bool,
+        on_certificate_reset: Option<&mut dyn FnMut() -> bool>,
     ) -> Result<Self, Error> {
         let machine_name = machine_name.unwrap_or_else(|| MACHINE_NAME.to_string());
 
@@ -91,7 +92,10 @@ impl CertificateIdentity {
                 let cert_pem = encode_string(
                     "CERTIFICATE",
                     LineEnding::LF,
-                    certificate.cert_content.as_ref(),
+                    certificate
+                        .cert_content
+                        .ok_or(Error::CertificatePemMissing)?
+                        .as_ref(),
                 )
                 .unwrap();
                 let key_pem = priv_key.to_pkcs8_pem(Default::default())?.to_string();
@@ -99,12 +103,22 @@ impl CertificateIdentity {
                 [cert_pem.into_bytes(), key_pem.into_bytes()]
             } else {
                 let (certificate, priv_key) = identity
-                    .request_new_certificate(session, team_id, &machine_name, certs)
+                    .request_new_certificate(
+                        session,
+                        team_id,
+                        &machine_name,
+                        certs,
+                        on_certificate_reset,
+                    )
                     .await?;
+
                 let cert_pem = encode_string(
                     "CERTIFICATE",
                     LineEnding::LF,
-                    certificate.cert_content.as_ref(),
+                    certificate
+                        .cert_content
+                        .ok_or(Error::CertificatePemMissing)?
+                        .as_ref(),
                 )
                 .unwrap();
                 let key_pem = priv_key.to_pkcs8_pem(Default::default())?.to_string();
@@ -115,10 +129,22 @@ impl CertificateIdentity {
             }
         } else {
             let (cert, priv_key) = identity
-                .request_new_certificate(session, team_id, &machine_name, certs)
+                .request_new_certificate(
+                    session,
+                    team_id,
+                    &machine_name,
+                    certs,
+                    on_certificate_reset,
+                )
                 .await?;
-            let cert_pem =
-                encode_string("CERTIFICATE", LineEnding::LF, cert.cert_content.as_ref()).unwrap();
+            let cert_pem = encode_string(
+                "CERTIFICATE",
+                LineEnding::LF,
+                cert.cert_content
+                    .ok_or(Error::CertificatePemMissing)?
+                    .as_ref(),
+            )
+            .unwrap();
             let key_pem = priv_key.to_pkcs8_pem(Default::default())?.to_string();
 
             fs::write(&key_path, &key_pem)?;
@@ -231,16 +257,18 @@ impl CertificateIdentity {
 
         for cert in certs {
             if cert.machine_name.as_deref() == Some(machine_name) {
-                let parsed_cert = X509Certificate::from_der(&cert.cert_content)?;
-                if pub_key_der_obj == parsed_cert.public_key_data().as_ref() {
-                    // We need to save the machine_id for our P12
-                    if let Some(ref machine_id) = cert.machine_id {
-                        self.set_machine_id(machine_id.clone());
+                if let Some(cert_content) = &cert.cert_content {
+                    let parsed_cert = X509Certificate::from_der(&cert_content)?;
+                    if pub_key_der_obj == parsed_cert.public_key_data().as_ref() {
+                        // We need to save the machine_id for our P12
+                        if let Some(ref machine_id) = cert.machine_id {
+                            self.set_machine_id(machine_id.clone());
+                        }
+
+                        self.set_serial_number(cert.serial_number.clone());
+
+                        return Ok(Some(cert));
                     }
-
-                    self.set_serial_number(cert.serial_number.clone());
-
-                    return Ok(Some(cert));
                 }
             }
         }
@@ -254,6 +282,7 @@ impl CertificateIdentity {
         team_id: &String,
         machine_name: &String,
         certs: Vec<Cert>,
+        mut on_certificate_reset: Option<&mut dyn FnMut() -> bool>,
     ) -> Result<(Cert, RsaPrivateKey), Error> {
         let priv_key = RsaPrivateKey::new(&mut OsRng, 2048)?;
         let priv_key_der = priv_key.to_pkcs8_der()?;
@@ -276,6 +305,7 @@ impl CertificateIdentity {
             .iter()
             .map(|c| c.serial_number.clone())
             .collect::<Vec<_>>();
+        let mut warned_about_reset = false;
 
         // When we submit a CSR theres a high chance of it failing, at least
         // on free developer accounts, we put it in a loop so whenever it does
@@ -293,6 +323,17 @@ impl CertificateIdentity {
                     // 7460 is for too many certificates (I think)
                     if matches!(&e, Error::DeveloperApi { result_code, .. } if *result_code == 7460)
                     {
+                        if !warned_about_reset {
+                            if let Some(callback) = on_certificate_reset.as_deref_mut() {
+                                if !callback() {
+                                    return Err(Error::Certificate(
+                                        "Certificate reset cancelled".into(),
+                                    ));
+                                }
+                            }
+                            warned_about_reset = true;
+                        }
+
                         // Try to revoke certificates from the candidate list
                         let mut revoked_any = false;
                         for cid in &cert_serial_numbers {
@@ -415,9 +456,14 @@ impl CertificateIdentity {
                 .find_certificate(certs.clone(), &priv_key, &machine_name)
                 .await?
             {
-                let cert_pem =
-                    encode_string("CERTIFICATE", LineEnding::LF, cert.cert_content.as_ref())
-                        .unwrap();
+                let cert_pem = encode_string(
+                    "CERTIFICATE",
+                    LineEnding::LF,
+                    cert.cert_content
+                        .ok_or(Error::CertificatePemMissing)?
+                        .as_ref(),
+                )
+                .unwrap();
                 let key_pem = priv_key.to_pkcs8_pem(Default::default())?.to_string();
 
                 [cert_pem.into_bytes(), key_pem.into_bytes()]
@@ -499,22 +545,25 @@ impl CertificateIdentity {
             .as_bytes()
             .to_vec();
         for cert in certificates {
-            let parsed_cert = X509Certificate::from_der(&cert.cert_content)?;
-            if cert.machine_name.as_deref() == Some(machine_name.as_str())
-                && pub_key_der_obj == parsed_cert.public_key_data().as_ref()
-            {
-                // Convert DER to PEM
-                let key_pem = pem_rfc7468::encode_string("PRIVATE KEY", LineEnding::LF, &key_der)
-                    .map_err(|e| {
-                    Error::Certificate(format!("Failed to encode key as PEM: {:?}", e))
-                })?;
+            if let Some(cert_content) = &cert.cert_content {
+                let parsed_cert = X509Certificate::from_der(cert_content)?;
+                if cert.machine_name.as_deref() == Some(machine_name.as_str())
+                    && pub_key_der_obj == parsed_cert.public_key_data().as_ref()
+                {
+                    // Convert DER to PEM
+                    let key_pem =
+                        pem_rfc7468::encode_string("PRIVATE KEY", LineEnding::LF, &key_der)
+                            .map_err(|e| {
+                                Error::Certificate(format!("Failed to encode key as PEM: {:?}", e))
+                            })?;
 
-                let key_path = Self::key_dir(config_path, team_id)?.join("key.pem");
-                if let Some(parent) = key_path.parent() {
-                    fs::create_dir_all(parent)?;
+                    let key_path = Self::key_dir(config_path, team_id)?.join("key.pem");
+                    if let Some(parent) = key_path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&key_path, key_pem)?;
+                    return Ok(());
                 }
-                fs::write(&key_path, key_pem)?;
-                return Ok(());
             }
         }
 
