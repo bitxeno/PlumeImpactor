@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
+use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 
 use crate::get_data_path;
 use idevice::IdeviceService;
@@ -44,16 +47,17 @@ pub struct AfcArgs {
 
 #[derive(Debug, Args)]
 pub struct PairingArgs {
-    /// Device IP to target (can also be UDID or device id as fallback)
-    #[arg(short = 'i', long = "ip", value_name = "IP")]
+    /// Device IP address
+    #[arg(long = "ip", value_name = "IP")]
     pub ip: String,
+
+    /// Device pairing service port
+    #[arg(long = "port", value_name = "PORT")]
+    pub port: u16,
 
     /// Path to pairing file to validate
     #[arg(short = 'f', long = "file", value_name = "PAIRING_FILE")]
-    pub pairing: String,
-
-    #[arg(short = 's', long = "save", value_name = "SAVE")]
-    pub save: bool,
+    pub pairing_file: String,
 }
 
 pub async fn execute(args: CheckArgs) -> Result<()> {
@@ -65,46 +69,27 @@ pub async fn execute(args: CheckArgs) -> Result<()> {
 }
 
 async fn pairing(args: PairingArgs) -> Result<()> {
-    use idevice::lockdown::LockdownClient;
-    use idevice::pairing_file::PairingFile;
-    use idevice::provider::TcpProvider;
     use std::net::IpAddr;
 
-    // Build a TCP provider using the provided IP and port 62078
-    let ip: IpAddr = args
-        .ip
-        .parse()
-        .map_err(|e| anyhow::anyhow!(format!("Invalid IP: {}", e)))?;
+    let ip = IpAddr::from_str(&args.ip)
+        .map_err(|e| anyhow::anyhow!("Invalid IP '{}': {}", args.ip, e))?;
+    let host = hostname::get()
+        .ok()
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "plumesign".to_string());
 
-    // Read pairing file directly into a `PairingFile` structure
-    let mut pairing_file = PairingFile::read_from_file(&args.pairing)
-        .map_err(|e| anyhow::anyhow!(format!("Failed to read pairing file: {}", e)))?;
+    let mut rpf = RpPairingFile::read_from_file(&args.pairing_file)
+        .await
+        .expect("invalid pairing file");
+    let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
+    let conn = RpPairingSocket::new(conn);
+    let mut rpc = RemotePairingClient::new(conn, &host, &mut rpf);
 
-    // Construct TcpProvider with port 62078 and the retrieved pairing file
-    let provider = TcpProvider {
-        addr: ip,
-        pairing_file: pairing_file.clone(),
-        label: "plume_check_pairing".to_string(),
-    };
+    rpc.attempt_pair_verify().await.expect("no paired");
+    rpc.validate_pairing().await.expect("no paired");
 
-    let mut lc = LockdownClient::connect(&provider).await?;
-    lc.start_session(&pairing_file).await?;
-
-    let serial_val = lc.get_value(Some("UniqueDeviceID"), None).await?;
-    let s_udid = serial_val.as_string().unwrap_or_default().to_string();
-    if args.save {
-        if pairing_file.udid.is_none() {
-            pairing_file.udid = Some(s_udid.clone());
-        }
-
-        log::info!("Saving pairing file for device UDID: {}", s_udid);
-        let mut usbmuxd: UsbmuxdConnection = UsbmuxdConnection::default().await?;
-        let pairing_file = pairing_file.serialize().expect("failed to serialize");
-
-        usbmuxd.save_pair_record(&s_udid, pairing_file).await?;
-    }
-
-    println!("SUCCESS: UDID `{}`", s_udid);
+    println!("SUCCESS: pairing file validated");
     Ok(())
 }
 

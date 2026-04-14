@@ -29,17 +29,21 @@ pub async fn execute(args: PairArgs) -> Result<()> {
 
     log::info!("Starting remote pairing with {}:{}", ip, args.port);
 
-    let host = "plumesign-remote-pair";
-    let mut pairing_file = RpPairingFile::generate(host);
+    let host = hostname::get()
+        .ok()
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "plumesign".to_string());
+    let mut pairing_file = RpPairingFile::generate(&host);
 
     let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
     let conn = RpPairingSocket::new(conn);
-    let mut rpc = RemotePairingClient::new(conn, host, &mut pairing_file);
+    let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
 
     rpc.connect(
         async |_| {
             Password::new()
-                .with_prompt("Enter device PIN")
+                .with_prompt("Enter PIN:")
                 .interact()
                 .expect("Failed to read PIN")
         },

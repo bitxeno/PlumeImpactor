@@ -8,6 +8,7 @@ pub mod device_id;
 pub mod macho;
 pub mod pair;
 pub mod sign;
+pub mod sign_rsd;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -27,6 +28,8 @@ pub struct Cli {
 pub enum Commands {
     /// Sign an iOS app bundle with certificate and provisioning profile
     Sign(sign::SignArgs),
+    /// Sign an iOS app bundle with certificate and provisioning profile (RSD)
+    SignRsd(sign_rsd::SignArgs),
     /// Inspect Mach-O binaries
     MachO(macho::MachArgs),
     /// Manage Apple Developer account authentication

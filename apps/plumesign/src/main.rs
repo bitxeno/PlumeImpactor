@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Sign(args) => commands::sign::execute(args).await?,
+        Commands::SignRsd(args) => commands::sign_rsd::execute(args).await?,
         Commands::MachO(args) => commands::macho::execute(args).await?,
         Commands::Account(args) => commands::account::execute(args).await?,
         Commands::Device(args) => commands::device::execute(args).await?,

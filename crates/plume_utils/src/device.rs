@@ -5,9 +5,9 @@ use idevice::core_device_proxy::CoreDeviceProxy;
 use idevice::installation_proxy::InstallationProxyClient;
 use idevice::lockdown::LockdownClient;
 use idevice::misagent::MisagentClient;
-use idevice::provider::UsbmuxdProvider;
+use idevice::provider::{RsdProvider, UsbmuxdProvider};
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile};
-use idevice::rsd::RsdHandshake;
+use idevice::rsd::{self, RsdHandshake};
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdDevice};
 use idevice::utils::installation;
 use idevice::{IdeviceService, RemoteXpcClient};
@@ -343,6 +343,34 @@ impl Device {
 
         installation::install_package_with_callback(&provider, app_path, None, callback, state)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn install_app_rsd<F, Fut>(
+        &self,
+        provider: &mut impl RsdProvider,
+        handshake: &mut rsd::RsdHandshake,
+        app_path: &PathBuf,
+        progress_callback: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(i32) -> Fut + Send + Clone + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
+        let callback = move |(progress, _): (u64, ())| {
+            let mut cb = progress_callback.clone();
+            async move {
+                cb(progress as i32).await;
+            }
+        };
+
+        let state = ();
+
+        installation::install_package_with_callback_rsd(
+            provider, handshake, app_path, None, callback, state,
+        )
+        .await?;
 
         Ok(())
     }
