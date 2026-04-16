@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Account(args) => commands::account::execute(args).await?,
         Commands::Device(args) => commands::device::execute(args).await?,
         Commands::DeviceId(args) => commands::device_id::execute(args).await?,
+        Commands::DeviceInfo(args) => commands::device_info::execute(args).await?,
         Commands::Pair(args) => commands::pair::execute(args).await?,
         Commands::Certificate(args) => commands::certificate::execute(args).await?,
         Commands::Check(args) => commands::check::execute(args).await?,

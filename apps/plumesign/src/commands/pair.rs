@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Args;
-use dialoguer::Password;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
-use std::{net::IpAddr, str::FromStr};
+use log::debug;
+use std::{fs, io::Write, net::IpAddr, path::Path, str::FromStr};
 
 #[derive(Debug, Args)]
 #[command(
@@ -28,6 +28,7 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Invalid IP '{}': {}", args.ip, e))?;
 
     log::info!("Starting remote pairing with {}:{}", ip, args.port);
+    debug!("Received pairing arguments: {:?}", args);
 
     let host = hostname::get()
         .ok()
@@ -40,31 +41,35 @@ pub async fn execute(args: PairArgs) -> Result<()> {
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
 
+    // try pairing, will fail with invalid pin
     rpc.connect(
         async |_| {
-            Password::new()
-                .with_prompt("Enter PIN:")
-                .interact()
-                .expect("Failed to read PIN")
+            let mut buf = String::new();
+            print!("Enter PIN:");
+            std::io::stdout().flush().unwrap();
+            std::io::stdin()
+                .read_line(&mut buf)
+                .expect("Failed to read line");
+            buf.trim_end().to_string()
         },
         0u8,
     )
-    .await?;
+    .await
+    .expect("Invalid PIN");
 
-    let output = args.output.unwrap_or_else(|| {
-        format!(
-            "remote_pairing_{}_{}.plist",
-            args.ip.replace(':', "_"),
-            args.port
-        )
-    });
-
-    pairing_file.write_to_file(&output).await?;
-
-    log::info!(
-        "SUCCESS: Remote pairing completed and pairing file saved to {}",
-        output
-    );
+    if let Some(output) = args.output.as_deref() {
+        // pairing file identifier is host identifier, not device identifier
+        if let Some(parent) = Path::new(output).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        pairing_file.write_to_file(output).await?;
+        log::info!(
+            "SUCCESS: Remote pairing completed and pairing file saved to {}",
+            output
+        );
+    } else {
+        log::info!("SUCCESS: Remote pairing completed");
+    }
 
     Ok(())
 }

@@ -5,6 +5,7 @@ pub mod certificate;
 pub mod check;
 pub mod device;
 pub mod device_id;
+pub mod device_info;
 pub mod macho;
 pub mod pair;
 pub mod sign;
@@ -40,6 +41,9 @@ pub enum Commands {
     Device(device::DeviceArgs),
     /// List connected devices (udid, id, name)
     DeviceId(device_id::DeviceIdArgs),
+    /// Show device information via usbmuxd/lockdown
+    #[command(name = "device_info", alias = "device-info")]
+    DeviceInfo(device_info::DeviceInfoArgs),
     /// Pair a device over network (IP/port)
     Pair(pair::PairArgs),
     /// Check PublicStaging via AFC and list files

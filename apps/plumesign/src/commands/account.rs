@@ -386,7 +386,13 @@ async fn delete_device(args: DeleteDeviceArgs) -> Result<()> {
 pub async fn teams(session: &DeveloperSession) -> Result<String> {
     let teams = session.qh_list_teams().await?.teams;
 
-    if teams.len() == 1 {
+    if teams.is_empty() {
+        return Err(anyhow::anyhow!("No teams found for account."));
+    }
+
+    // interact() will trigger `not a terminal` error in docker non-interactive environments
+    // so if there's only one team, just return it without prompting
+    if teams.len() > 0 {
         return Ok(teams[0].team_id.clone());
     }
 
