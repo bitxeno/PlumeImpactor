@@ -252,7 +252,6 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
             if let Some(dev) = device {
                 log::info!("Installing to device: {}", dev.name);
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 dev.install_app_rsd(
                     &mut handle,
                     &mut handshake,
