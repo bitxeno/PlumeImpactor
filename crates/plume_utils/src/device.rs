@@ -10,7 +10,7 @@ use idevice::remote_pairing::{RemotePairingClient, RpPairingFile};
 use idevice::rsd::{self, RsdHandshake};
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdDevice};
 use idevice::utils::installation;
-use idevice::{IdeviceService, RemoteXpcClient};
+use idevice::{IdeviceService, RemoteXpcClient, RsdService};
 use plume_core::MobileProvision;
 
 use crate::Error;
@@ -132,6 +132,18 @@ impl Device {
         );
 
         let mut mc = MisagentClient::connect(&provider).await?;
+        mc.install(profile.data.clone()).await?;
+
+        Ok(())
+    }
+
+    pub async fn install_profile_rsd(
+        &self,
+        provider: &mut impl RsdProvider,
+        handshake: &mut rsd::RsdHandshake,
+        profile: &MobileProvision,
+    ) -> Result<(), Error> {
+        let mut mc = MisagentClient::connect_rsd(provider, handshake).await?;
         mc.install(profile.data.clone()).await?;
 
         Ok(())

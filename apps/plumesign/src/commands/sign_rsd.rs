@@ -240,7 +240,8 @@ pub async fn execute(args: SignArgs) -> Result<()> {
             if let Some(ref dev) = device {
                 log::info!("Installing to device: {}", dev.name);
                 for provision in &signer.provisioning_files {
-                    dev.install_profile(provision).await?
+                    dev.install_profile_rsd(&mut handle, &mut handshake, provision)
+                        .await?
                 }
                 log::info!("Installation complete!");
             }
