@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{ArgGroup, Args, Subcommand};
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
+use log::debug;
 
 use crate::get_data_path;
 use idevice::IdeviceService;
@@ -147,7 +148,6 @@ async fn validate_pairing_folder(folder: &Path, ip: &str, port: u16, host: &str)
         ));
     }
 
-    let mut failures = Vec::new();
     for pairing_file in plist_files {
         match validate_pairing_file(&pairing_file, ip, port, host).await {
             Ok(()) => {
@@ -155,15 +155,20 @@ async fn validate_pairing_folder(folder: &Path, ip: &str, port: u16, host: &str)
                 return Ok(());
             }
             Err(error) => {
-                failures.push(format!("{}: {}", pairing_file.display(), error));
+                debug!(
+                    "Failed to validate pairing file '{}': {}",
+                    pairing_file.display(),
+                    error
+                );
             }
         }
     }
 
     Err(anyhow::anyhow!(
-        "No pairing file in '{}' could connect:\n{}",
-        folder.display(),
-        failures.join("\n")
+        "Failed to validate pairing for {} ({}:{})",
+        host,
+        ip,
+        port
     ))
 }
 
@@ -219,9 +224,9 @@ async fn afc(args: AfcArgs) -> Result<()> {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "plumesign".to_string());
 
-        let mut rpf = RpPairingFile::read_from_file(pairing_file).await.map_err(|e| {
-            anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file, e)
-        })?;
+        let mut rpf = RpPairingFile::read_from_file(pairing_file)
+            .await
+            .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file, e))?;
 
         let conn = tokio::net::TcpStream::connect((ip, port)).await?;
         let conn = RpPairingSocket::new(conn);
