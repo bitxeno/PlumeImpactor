@@ -3706,7 +3706,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "idevice"
 version = "0.1.57"
-source = "git+https://github.com/bitxeno/idevice?branch=develop#c269b75428723a1b6ee9e294fbf5330cb4db5e97"
+source = "git+https://github.com/bitxeno/idevice?branch=develop#7f44489f6e1b1ef3b813702bd3969171e8b443b5"
 dependencies = [
  "aes 0.8.4",
  "async-stream",

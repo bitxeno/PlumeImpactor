@@ -3,13 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args;
 
-use idevice::{
-    remote_pairing::{
-        RemotePairingClient, RpPairingFile, RpPairingSocket, connect_tls_psk_tunnel_native,
-    },
-    rsd::RsdHandshake,
-    tcp,
-};
+use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use plume_core::{CertificateIdentity, MobileProvision, developer::qh::devices::DeviceType};
 use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
 use std::{net::IpAddr, str::FromStr};
@@ -85,7 +79,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     }
     let ip = IpAddr::from_str(&args.ip)
         .map_err(|e| anyhow::anyhow!("Invalid IP '{}': {}", args.ip, e))?;
-    let host = hostname::get()
+    let host_name = hostname::get()
         .ok()
         .and_then(|name| name.into_string().ok())
         .filter(|name| !name.is_empty())
@@ -94,67 +88,32 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     let mut rpf = RpPairingFile::read_from_file(&args.pairing_file).await?;
     let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
     let conn = RpPairingSocket::new(conn);
-    let mut rpc = RemotePairingClient::new(conn, &host, &mut rpf);
+    let mut rpc = RemotePairingClient::new(conn, &host_name, &mut rpf);
 
-    rpc.attempt_pair_verify().await.expect("no paired");
-    rpc.validate_pairing().await.expect("no paired");
-
-    // create rsd tcp tunnel
-    log::info!("Connecting to tunnel...");
-    let tunnel_port = rpc
-        .create_tcp_listener()
-        .await
-        .expect("create_tcp_listener failed");
-    let tunnel_stream = tokio::net::TcpStream::connect((ip, tunnel_port))
-        .await
-        .expect("Failed to connect to tunnel port");
-    let tunnel = connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key())
-        .await
-        .expect("Failed to establish TLS-PSK tunnel");
-    println!("Tunnel established!");
-    println!("  Client address: {}", tunnel.info.client_address);
-    println!("  Server address: {}", tunnel.info.server_address);
-    println!("  MTU: {}", tunnel.info.mtu);
-    println!("  RSD port: {}", tunnel.info.server_rsd_port);
-
-    let client_ip: std::net::IpAddr = tunnel.info.client_address.parse().expect("bad client IP");
-    let server_ip: std::net::IpAddr = tunnel.info.server_address.parse().expect("bad server IP");
-    let rsd_port = tunnel.info.server_rsd_port;
-
-    // Feed the tunnel into jktcp
-    let raw_stream = tunnel.into_inner();
-    let adapter = tcp::adapter::Adapter::new(Box::new(raw_stream), client_ip, server_ip);
-    let mut handle: tcp::handle::AdapterHandle = adapter.to_async_handle();
-
-    // Connect to the RSD port through the tunnel
-    let rsd_stream = handle
-        .connect(rsd_port)
-        .await
-        .expect("Failed to connect to RSD through tunnel: {e}");
-
-    println!("Performing RSD handshake through tunnel...");
-    let mut handshake = RsdHandshake::new(rsd_stream)
-        .await
-        .expect("RSD handshake through tunnel failed");
+    let (mut handle, mut handshake) = rpc.tunnel_connect(&args.ip).await?;
 
     use plume_utils::Device;
-    let device = Some(Device {
-        name: handshake
-            .properties
-            .get("DeviceClass")
-            .and_then(|v| v.as_string())
-            .unwrap_or_default()
-            .to_string(),
-        udid: handshake
-            .properties
-            .get("UniqueDeviceID")
-            .and_then(|v| v.as_string())
-            .unwrap_or_default()
-            .to_string(),
-        device_id: 0,
-        usbmuxd_device: None,
-        is_mac: false,
-    });
+    let device = if args.register_and_install {
+        Some(Device {
+            name: handshake
+                .properties
+                .get("DeviceClass")
+                .and_then(|v| v.as_string())
+                .unwrap_or_default()
+                .to_string(),
+            udid: handshake
+                .properties
+                .get("UniqueDeviceID")
+                .and_then(|v| v.as_string())
+                .unwrap_or_default()
+                .to_string(),
+            device_id: 0,
+            usbmuxd_device: None,
+            is_mac: false,
+        })
+    } else {
+        None
+    };
 
     let mut options = SignerOptions {
         custom_identifier: args.bundle_identifier,
