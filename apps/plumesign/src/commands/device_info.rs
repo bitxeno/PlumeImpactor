@@ -123,7 +123,7 @@ async fn fetch_remote_device_info(ip: &str, port: u16, pairing_file_path: &str) 
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
 
-    let (mut provider, mut handshake) = rpc.tunnel_connect(ip).await?;
+    let (mut provider, mut handshake) = rpc.start_tunnel(ip).await?;
     let mut lockdown = LockdownClient::connect_rsd(&mut provider, &mut handshake).await?;
 
     let mut value = lockdown.get_value(None, None).await?;

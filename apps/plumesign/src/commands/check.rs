@@ -180,7 +180,7 @@ async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, host, &mut rpf);
 
-    let (_, handshake) = rpc.tunnel_connect(ip).await?;
+    let (_, handshake) = rpc.start_tunnel(ip).await?;
     println!(
         "pairing file: `{}`, uuid: `{}`, DeviceClass: `{}`, UniqueDeviceID: `{}`",
         pairing_file
@@ -232,7 +232,7 @@ async fn afc(args: AfcArgs) -> Result<()> {
         let conn = RpPairingSocket::new(conn);
         let mut rpc = RemotePairingClient::new(conn, &host, &mut rpf);
 
-        let (mut provider, mut handshake) = rpc.tunnel_connect(ip).await?;
+        let (mut provider, mut handshake) = rpc.start_tunnel(ip).await?;
         let mut afc = AfcClient::connect_rsd(&mut provider, &mut handshake).await?;
         let _ = afc.list_dir("/").await?;
 

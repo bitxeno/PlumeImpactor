@@ -90,7 +90,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, &host_name, &mut rpf);
 
-    let (mut handle, mut handshake) = rpc.tunnel_connect(&args.ip).await?;
+    let (mut handle, mut handshake) = rpc.start_tunnel(&args.ip).await?;
 
     use plume_utils::Device;
     let device = if args.register_and_install {
