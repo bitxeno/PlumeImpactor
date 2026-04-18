@@ -5,7 +5,7 @@ use clap::{Args, Subcommand};
 use idevice::lockdown::LockdownClient;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use serde_json::json;
-use std::{fs, io::Write, net::IpAddr, str::FromStr};
+use std::fs;
 
 use crate::get_data_path;
 use base64::Engine;
@@ -71,6 +71,10 @@ pub struct AfcArgs {
 
 #[derive(Debug, Args)]
 pub struct PairingArgs {
+    /// Device UDID to target (optional, will prompt if not provided)
+    #[arg(short = 'u', long = "udid", value_name = "UDID")]
+    pub udid: Option<String>,
+
     /// Device IP address
     #[arg(long = "ip", value_name = "IP")]
     pub ip: String,
@@ -169,12 +173,19 @@ async fn pairing(args: PairingArgs) -> Result<()> {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "plumesign".to_string());
 
-    let pairing_file = args
-        .pairing_file
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("pairing file or pairing file folder is required"))?;
+    let pairing_file = if let Some(pairing_file) = args.pairing_file.as_deref() {
+        std::path::PathBuf::from(pairing_file)
+    } else if let Some(udid) = args.udid.as_deref() {
+        get_data_path()
+            .join("pairing_files")
+            .join(format!("{}.plist", udid))
+    } else {
+        return Err(anyhow::anyhow!(
+            "pairing file is required when ip and port are provided"
+        ));
+    };
 
-    let path = Path::new(pairing_file);
+    let path = Path::new(&pairing_file);
     validate_pairing_file(path, &ip, args.port, &host).await?;
     Ok(())
 }
@@ -253,18 +264,29 @@ async fn config() -> Result<()> {
 }
 
 async fn afc(args: AfcArgs) -> Result<()> {
-    if let (Some(ip), Some(port), Some(pairing_file)) =
-        (args.ip.as_deref(), args.port, args.pairing_file.as_deref())
-    {
+    if let (Some(ip), Some(port)) = (args.ip.as_deref(), args.port) {
+        let pairing_file = if let Some(pairing_file) = args.pairing_file.as_deref() {
+            std::path::PathBuf::from(pairing_file)
+        } else if let Some(udid) = args.udid.as_deref() {
+            get_data_path()
+                .join("pairing_files")
+                .join(format!("{}.plist", udid))
+        } else {
+            return Err(anyhow::anyhow!(
+                "pairing file is required when ip and port are provided"
+            ));
+        };
         let host = hostname::get()
             .ok()
             .and_then(|name| name.into_string().ok())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "plumesign".to_string());
 
-        let mut rpf = RpPairingFile::read_from_file(pairing_file)
+        let mut rpf = RpPairingFile::read_from_file(&pairing_file)
             .await
-            .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file, e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file.display(), e)
+            })?;
 
         let conn = tokio::net::TcpStream::connect((ip, port)).await?;
         let conn = RpPairingSocket::new(conn);
