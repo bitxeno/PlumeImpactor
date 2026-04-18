@@ -51,11 +51,11 @@ pub struct AfcArgs {
     pub udid: Option<String>,
 
     /// Device IP address
-    #[arg(long = "ip", value_name = "IP", requires_all = ["port", "pairing_file"])]
+    #[arg(long = "ip", value_name = "IP", requires_all = ["port"])]
     pub ip: Option<String>,
 
     /// Device pairing service port
-    #[arg(long = "port", value_name = "PORT", requires_all = ["ip", "pairing_file"])]
+    #[arg(long = "port", value_name = "PORT", requires_all = ["ip"])]
     pub port: Option<u16>,
 
     /// Path to pairing file
@@ -63,8 +63,7 @@ pub struct AfcArgs {
         short = 'f',
         long = "file",
         visible_alias = "pairing-file",
-        value_name = "PAIRING_FILE",
-        requires_all = ["ip", "port"]
+        value_name = "PAIRING_FILE"
     )]
     pub pairing_file: Option<String>,
 }
@@ -84,7 +83,12 @@ pub struct PairingArgs {
     pub port: u16,
 
     /// Path to pairing file to validate
-    #[arg(short = 'f', long = "file", value_name = "PAIRING_FILE")]
+    #[arg(
+        short = 'f',
+        long = "file",
+        visible_alias = "pairing-file",
+        value_name = "PAIRING_FILE"
+    )]
     pub pairing_file: Option<String>,
 }
 

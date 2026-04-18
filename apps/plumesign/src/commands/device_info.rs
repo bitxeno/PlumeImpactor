@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::{net::IpAddr, str::FromStr};
 
+use crate::get_data_path;
 use anyhow::Result;
 use clap::Args;
 use idevice::IdeviceService;
@@ -27,11 +28,11 @@ pub struct DeviceInfoArgs {
     pub udid: Option<String>,
 
     /// Device IP address
-    #[arg(long = "ip", value_name = "IP", requires_all = ["port", "pairing_file"])]
+    #[arg(long = "ip", value_name = "IP", requires_all = ["port"])]
     pub ip: Option<String>,
 
     /// Device pairing service port
-    #[arg(long = "port", value_name = "PORT", requires_all = ["ip", "pairing_file"])]
+    #[arg(long = "port", value_name = "PORT", requires_all = ["ip"])]
     pub port: Option<u16>,
 
     /// Path to pairing file
@@ -39,8 +40,7 @@ pub struct DeviceInfoArgs {
         short = 'f',
         long = "file",
         visible_alias = "pairing-file",
-        value_name = "PAIRING_FILE",
-        requires_all = ["ip", "port"]
+        value_name = "PAIRING_FILE"
     )]
     pub pairing_file: Option<String>,
 
@@ -50,10 +50,20 @@ pub struct DeviceInfoArgs {
 }
 
 pub async fn execute(args: DeviceInfoArgs) -> Result<()> {
-    let value = if let (Some(ip), Some(port), Some(pairing_file_path)) =
-        (args.ip.as_deref(), args.port, args.pairing_file.as_deref())
-    {
-        fetch_remote_device_info(ip, port, pairing_file_path).await?
+    let value = if let (Some(ip), Some(port)) = (args.ip.as_deref(), args.port) {
+        let pairing_file: std::path::PathBuf =
+            if let Some(pairing_file) = args.pairing_file.as_deref() {
+                std::path::PathBuf::from(pairing_file)
+            } else if let Some(udid) = args.udid.as_deref() {
+                get_data_path()
+                    .join("pairing_files")
+                    .join(format!("{}.plist", udid))
+            } else {
+                return Err(anyhow::anyhow!(
+                    "pairing file is required when ip and port are provided"
+                ));
+            };
+        fetch_remote_device_info(ip, port, &pairing_file).await?
     } else {
         fetch_usb_device_info(args.udid).await?
     };
@@ -106,7 +116,11 @@ async fn fetch_usb_device_info(udid: Option<String>) -> Result<Value> {
     Ok(value)
 }
 
-async fn fetch_remote_device_info(ip: &str, port: u16, pairing_file_path: &str) -> Result<Value> {
+async fn fetch_remote_device_info(
+    ip: &str,
+    port: u16,
+    pairing_file_path: &std::path::Path,
+) -> Result<Value> {
     let ip_addr =
         IpAddr::from_str(ip).map_err(|e| anyhow::anyhow!("Invalid IP '{}': {}", ip, e))?;
     let host = hostname::get()
@@ -117,7 +131,13 @@ async fn fetch_remote_device_info(ip: &str, port: u16, pairing_file_path: &str) 
 
     let mut pairing_file = RpPairingFile::read_from_file(pairing_file_path)
         .await
-        .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file_path, e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "invalid pairing file '{}': {}",
+                pairing_file_path.display(),
+                e
+            )
+        })?;
 
     let conn = tokio::net::TcpStream::connect((ip_addr, port)).await?;
     let conn = RpPairingSocket::new(conn);
