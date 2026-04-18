@@ -1,15 +1,17 @@
 use std::path::Path;
 
 use anyhow::Result;
-use clap::{ArgGroup, Args, Subcommand};
+use clap::{Args, Subcommand};
+use idevice::lockdown::LockdownClient;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
-use log::debug;
+use serde_json::json;
+use std::{fs, io::Write, net::IpAddr, str::FromStr};
 
 use crate::get_data_path;
-use idevice::IdeviceService;
-use idevice::RsdService;
+use base64::Engine;
 use idevice::afc::AfcClient;
 use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
+use idevice::{IdeviceService, RsdService};
 use plume_core::AnisetteConfiguration;
 use plume_core::auth::anisette_data::AnisetteData;
 
@@ -35,6 +37,8 @@ pub enum CheckCommands {
     Afc(AfcArgs),
     /// Validate a pairing file against a device (use ip to select device)
     Pairing(PairingArgs),
+    /// Find a pairing file or folder to validate
+    FindPairing(FindPairingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -66,14 +70,6 @@ pub struct AfcArgs {
 }
 
 #[derive(Debug, Args)]
-#[command(
-    group(
-        ArgGroup::new("pairing_source")
-            .args(["pairing_file_folder", "pairing_file"])
-            .required(true)
-            .multiple(false)
-    )
-)]
 pub struct PairingArgs {
     /// Device IP address
     #[arg(long = "ip", value_name = "IP")]
@@ -83,13 +79,20 @@ pub struct PairingArgs {
     #[arg(long = "port", value_name = "PORT")]
     pub port: u16,
 
-    /// Path to pairing file folder to validate
-    #[arg(long = "folder", value_name = "PAIRING_FILE_FOLDER")]
-    pub pairing_file_folder: Option<String>,
-
     /// Path to pairing file to validate
     #[arg(short = 'f', long = "file", value_name = "PAIRING_FILE")]
     pub pairing_file: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct FindPairingArgs {
+    /// Device IP address
+    #[arg(long)]
+    pub identifier: String,
+
+    /// Device pairing service port
+    #[arg(long)]
+    pub auth_tag: String,
 }
 
 pub async fn execute(args: CheckArgs) -> Result<()> {
@@ -97,35 +100,20 @@ pub async fn execute(args: CheckArgs) -> Result<()> {
         CheckCommands::Config => config().await,
         CheckCommands::Afc(afc_args) => afc(afc_args).await,
         CheckCommands::Pairing(pair_args) => pairing(pair_args).await,
+        CheckCommands::FindPairing(find_pairing_args) => find_pairing(find_pairing_args).await,
     }
 }
 
-async fn pairing(args: PairingArgs) -> Result<()> {
-    let ip = args.ip;
-    let host = hostname::get()
-        .ok()
-        .and_then(|name| name.into_string().ok())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "plumesign".to_string());
+async fn find_pairing(args: FindPairingArgs) -> Result<()> {
+    let identifier = args.identifier;
+    let auto_tag = args.auth_tag;
+    let pairing_file_dir = get_data_path().join("pairing_files");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(auto_tag)
+        .expect("Invalid auth tag");
 
-    if let Some(folder) = args.pairing_file_folder.as_deref() {
-        return validate_pairing_folder(Path::new(folder), &ip, args.port, &host).await;
-    }
-
-    let pairing_file = args
-        .pairing_file
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("pairing file or pairing file folder is required"))?;
-
-    let path = Path::new(pairing_file);
-    validate_pairing_file(path, &ip, args.port, &host).await?;
-    println!("SUCCESS: Pair verify succeeded");
-    Ok(())
-}
-
-async fn validate_pairing_folder(folder: &Path, ip: &str, port: u16, host: &str) -> Result<()> {
-    let entries = std::fs::read_dir(folder)
-        .map_err(|e| anyhow::anyhow!("Failed to read folder '{}': {}", folder.display(), e))?;
+    let entries =
+        std::fs::read_dir(pairing_file_dir.clone()).expect("Failed to read pairing file directory");
 
     let mut plist_files = Vec::new();
     for entry in entries {
@@ -144,61 +132,111 @@ async fn validate_pairing_folder(folder: &Path, ip: &str, port: u16, host: &str)
     if plist_files.is_empty() {
         return Err(anyhow::anyhow!(
             "No .plist pairing files found in '{}'",
-            folder.display()
+            pairing_file_dir.display()
         ));
     }
 
     for pairing_file in plist_files {
-        match validate_pairing_file(&pairing_file, ip, port, host).await {
-            Ok(()) => {
-                println!("SUCCESS: Pair verify succeeded");
-                return Ok(());
-            }
-            Err(error) => {
-                debug!(
-                    "Failed to validate pairing file '{}': {}",
-                    pairing_file.display(),
-                    error
-                );
-            }
+        let rpf = RpPairingFile::read_from_file(pairing_file.clone()).await?;
+
+        if rpf.alt_irk.is_empty() {
+            continue; // skip invalid pairing files
+        }
+
+        if rpf.validate_auth_tag(&identifier, bytes.as_slice()) {
+            println!(
+                "UDID: `{}`",
+                pairing_file
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+            );
+            return Ok(());
         }
     }
 
     Err(anyhow::anyhow!(
-        "Failed to validate pairing for {} ({}:{})",
-        host,
-        ip,
-        port
+        "Failed to validate pairing for {}",
+        identifier
     ))
+}
+
+async fn pairing(args: PairingArgs) -> Result<()> {
+    let ip = args.ip;
+    let host = hostname::get()
+        .ok()
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "plumesign".to_string());
+
+    let pairing_file = args
+        .pairing_file
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("pairing file or pairing file folder is required"))?;
+
+    let path = Path::new(pairing_file);
+    validate_pairing_file(path, &ip, args.port, &host).await?;
+    Ok(())
 }
 
 async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &str) -> Result<()> {
     let mut rpf = RpPairingFile::read_from_file(pairing_file)
         .await
         .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file.display(), e))?;
+    if rpf.alt_irk.is_empty() {
+        return Err(anyhow::anyhow!(
+            "invalid pairing file '{}': alt_irk is empty",
+            pairing_file.display()
+        ));
+    }
     let conn = tokio::net::TcpStream::connect((ip, port)).await?;
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, host, &mut rpf);
 
-    let (_, handshake) = rpc.start_tunnel(ip).await?;
-    println!(
-        "pairing file: `{}`, uuid: `{}`, DeviceClass: `{}`, UniqueDeviceID: `{}`",
-        pairing_file
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown"),
-        handshake.uuid,
-        handshake
-            .properties
-            .get("DeviceClass")
-            .and_then(|v| v.as_string())
-            .unwrap_or("unknown"),
-        handshake
-            .properties
-            .get("UniqueDeviceID")
-            .and_then(|v| v.as_string())
-            .unwrap_or("unknown")
-    );
+    let (mut provider, mut handshake) = rpc.start_tunnel(ip).await?;
+    let mut lockdown = LockdownClient::connect_rsd(&mut provider, &mut handshake).await?;
+    let value = lockdown.get_value(None, None).await?;
+
+    let peer_identifier = rpc
+        .peer_identifier()
+        .expect("Failed to get peer identifier");
+    let udid = value
+        .as_dictionary()
+        .and_then(|dict| dict.get("UniqueDeviceID"))
+        .and_then(|v| v.as_string())
+        .expect("Failed to get UniqueDeviceID from lockdown value");
+    let name = value
+        .as_dictionary()
+        .and_then(|dict| dict.get("DeviceName"))
+        .and_then(|v| v.as_string())
+        .expect("Failed to get DeviceName from lockdown value");
+    let model = value
+        .as_dictionary()
+        .and_then(|dict| dict.get("ProductType"))
+        .and_then(|v| v.as_string())
+        .expect("Failed to get ProductType from lockdown value");
+    let peer_info_json = json!({
+        "account_id": peer_identifier,
+        "alt_irk": rpf.alt_irk,
+        "model": model,
+        "name": name,
+        "remotepairing_udid": udid,
+    });
+
+    let pairing_file_dir = get_data_path().join("pairing_files");
+    fs::create_dir_all(&pairing_file_dir)?;
+
+    // save pairing file
+    let output = pairing_file_dir.join(format!("{}.plist", udid));
+    rpf.write_to_file(output).await?;
+
+    // save peer device info for reference
+    let peer_info_output = pairing_file_dir.join(format!("{}.json", udid));
+    fs::write(
+        peer_info_output,
+        serde_json::to_string_pretty(&peer_info_json)?,
+    )?;
+
     Ok(())
 }
 
@@ -232,9 +270,8 @@ async fn afc(args: AfcArgs) -> Result<()> {
         let conn = RpPairingSocket::new(conn);
         let mut rpc = RemotePairingClient::new(conn, &host, &mut rpf);
 
-        let (mut provider, mut handshake) = rpc.start_tunnel(ip).await?;
-        let mut afc = AfcClient::connect_rsd(&mut provider, &mut handshake).await?;
-        let _ = afc.list_dir("/").await?;
+        rpc.attempt_pair_verify().await?;
+        rpc.validate_pairing().await?;
 
         println!("SUCCESS: AFC access OK (RSD)");
         return Ok(());

@@ -3706,7 +3706,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "idevice"
 version = "0.1.57"
-source = "git+https://github.com/bitxeno/idevice?branch=develop#890736064deb3032229bcf70b23aceb1a804a325"
+source = "git+https://github.com/bitxeno/idevice?branch=develop#01f3ec653fa60c929e3109e7d732f9fdf68366f3"
 dependencies = [
  "aes 0.8.4",
  "async-stream",
@@ -3736,6 +3736,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2 0.10.9",
+ "siphasher",
  "thiserror 2.0.17",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -5700,6 +5701,7 @@ name = "plumesign"
 version = "2.2.2"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dialoguer 0.12.0",
@@ -5715,6 +5717,7 @@ dependencies = [
  "plume_store",
  "plume_utils",
  "rustls 0.23.35",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -7096,6 +7099,12 @@ dependencies = [
  "widestring 0.4.3",
  "winapi",
 ]
+
+[[package]]
+name = "siphasher"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "skrifa"

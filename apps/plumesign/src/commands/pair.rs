@@ -1,8 +1,10 @@
+use crate::get_data_path;
 use anyhow::Result;
 use clap::Args;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use log::debug;
-use std::{fs, io::Write, net::IpAddr, path::Path, str::FromStr};
+use serde_json::json;
+use std::{fs, io::Write, net::IpAddr, str::FromStr};
 
 #[derive(Debug, Args)]
 #[command(
@@ -17,10 +19,6 @@ pub struct PairArgs {
     /// Device pairing service port
     #[arg(short = 'p', long = "port", value_name = "PORT")]
     pub port: u16,
-
-    /// Path to save the generated remote pairing file
-    #[arg(short = 'o', long = "output", value_name = "FILE")]
-    pub output: Option<String>,
 }
 
 pub async fn execute(args: PairArgs) -> Result<()> {
@@ -37,39 +35,59 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         .unwrap_or_else(|| "plumesign".to_string());
     let mut pairing_file = RpPairingFile::generate(&host);
 
-    let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
-    let conn = RpPairingSocket::new(conn);
-    let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
+    let (udid, peer_info_json) = {
+        let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
+        let conn = RpPairingSocket::new(conn);
+        let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
 
-    // try pairing, will fail with invalid pin
-    rpc.connect(
-        async |_| {
-            let mut buf = String::new();
-            print!("Enter PIN:");
-            std::io::stdout().flush().unwrap();
-            std::io::stdin()
-                .read_line(&mut buf)
-                .expect("Failed to read line");
-            buf.trim_end().to_string()
-        },
-        0u8,
-    )
-    .await
-    .expect("Invalid PIN");
+        // try pairing, will fail with invalid pin
+        rpc.connect(
+            async |_| {
+                let mut buf = String::new();
+                print!("Enter PIN:");
+                std::io::stdout().flush().unwrap();
+                std::io::stdin()
+                    .read_line(&mut buf)
+                    .expect("Failed to read line");
+                buf.trim_end().to_string()
+            },
+            0u8,
+        )
+        .await
+        .expect("Invalid PIN");
 
-    if let Some(output) = args.output.as_deref() {
-        // pairing file identifier is host identifier, not device identifier
-        if let Some(parent) = Path::new(output).parent() {
-            fs::create_dir_all(parent)?;
-        }
-        pairing_file.write_to_file(output).await?;
-        log::info!(
-            "SUCCESS: Remote pairing completed and pairing file saved to {}",
-            output
-        );
-    } else {
-        log::info!("SUCCESS: Remote pairing completed");
-    }
+        let peer_device: &idevice::remote_pairing::PeerDevice =
+            rpc.peer_device().expect("Failed to get peer device");
+        let udid = peer_device
+            .remotepairing_udid
+            .as_deref()
+            .expect("Failed to get remotepairing_udid from peer device")
+            .to_string();
+        let peer_info_json = json!({
+            "account_id": peer_device.account_id,
+            "alt_irk": peer_device.alt_irk,
+            "model": peer_device.model,
+            "name": peer_device.name,
+            "remotepairing_udid": peer_device.remotepairing_udid,
+        });
 
+        (udid, peer_info_json)
+    };
+
+    let pairing_file_dir = get_data_path().join("pairing_files");
+    fs::create_dir_all(&pairing_file_dir)?;
+
+    // save pairing file
+    let output = pairing_file_dir.join(format!("{}.plist", udid));
+    pairing_file.write_to_file(output).await?;
+
+    // save peer device info for reference
+    let peer_info_output = pairing_file_dir.join(format!("{}.json", udid));
+    fs::write(
+        peer_info_output,
+        serde_json::to_string_pretty(&peer_info_json)?,
+    )?;
+
+    log::info!("SUCCESS: Remote pairing completed");
     Ok(())
 }
