@@ -69,5 +69,6 @@ jobs:
           files: dist/**/*.tar.gz
           generate_release_notes: true
           prerelease: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

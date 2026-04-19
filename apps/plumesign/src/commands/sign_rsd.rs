@@ -49,6 +49,9 @@ pub struct SignArgs {
     /// Register device and install after signing
     #[arg(long)]
     pub register_and_install: bool,
+    /// Device UDID to register and install to (will prompt if not provided)
+    #[arg(long, value_name = "UDID")]
+    pub udid: Option<String>,
     /// Device IP address
     #[arg(long = "ip", value_name = "IP")]
     pub ip: String,
@@ -56,7 +59,7 @@ pub struct SignArgs {
     #[arg(long = "port", value_name = "PORT")]
     pub port: u16,
     #[arg(long)]
-    pub pairing_file: String,
+    pub pairing_file: Option<String>,
     /// Output path for signed .ipa (only for .ipa input)
     #[arg(long, short, value_name = "OUTPUT")]
     pub output: Option<PathBuf>,
@@ -77,6 +80,17 @@ pub async fn execute(args: SignArgs) -> Result<()> {
             "-o/--output is required when signing an .ipa without --apple-id (ad-hoc mode)."
         ));
     }
+    let pairing_file = if let Some(pairing_file) = args.pairing_file.as_deref() {
+        std::path::PathBuf::from(pairing_file)
+    } else if let Some(udid) = args.udid.as_deref() {
+        get_data_path()
+            .join("pairing_files")
+            .join(format!("{}.plist", udid))
+    } else {
+        return Err(anyhow::anyhow!(
+            "pairing file is required when ip and port are provided"
+        ));
+    };
     let ip = IpAddr::from_str(&args.ip)
         .map_err(|e| anyhow::anyhow!("Invalid IP '{}': {}", args.ip, e))?;
     let host_name = hostname::get()
@@ -85,7 +99,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "plumesign".to_string());
 
-    let mut rpf = RpPairingFile::read_from_file(&args.pairing_file).await?;
+    let mut rpf = RpPairingFile::read_from_file(&pairing_file).await?;
     let conn = tokio::net::TcpStream::connect((ip, args.port)).await?;
     let conn = RpPairingSocket::new(conn);
     let mut rpc = RemotePairingClient::new(conn, &host_name, &mut rpf);
