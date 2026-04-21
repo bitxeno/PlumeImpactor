@@ -1,14 +1,14 @@
+use std::fmt::Debug;
 use std::path::Path;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use idevice::lockdown::LockdownClient;
-use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
+use idevice::remote_pairing::{PeerDevice, RemotePairingClient, RpPairingFile, RpPairingSocket};
 use serde_json::json;
 use std::fs;
 
 use crate::get_data_path;
-use base64::Engine;
 use idevice::afc::AfcClient;
 use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
 use idevice::{IdeviceService, RsdService};
@@ -101,6 +101,10 @@ pub struct FindPairingArgs {
     /// Device pairing service port
     #[arg(long)]
     pub auth_tag: String,
+
+    /// Optional folder to search for pairing files (defaults to data/pairing_files)
+    #[arg(long)]
+    pub folder: Option<String>,
 }
 
 pub async fn execute(args: CheckArgs) -> Result<()> {
@@ -115,10 +119,12 @@ pub async fn execute(args: CheckArgs) -> Result<()> {
 async fn find_pairing(args: FindPairingArgs) -> Result<()> {
     let identifier = args.identifier;
     let auto_tag = args.auth_tag;
-    let pairing_file_dir = get_data_path().join("pairing_files");
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(auto_tag)
-        .expect("Invalid auth tag");
+    let pairing_file_dir = args.folder.unwrap_or_else(|| {
+        get_data_path()
+            .join("pairing_files")
+            .to_string_lossy()
+            .to_string()
+    });
 
     let entries =
         std::fs::read_dir(pairing_file_dir.clone()).expect("Failed to read pairing file directory");
@@ -138,20 +144,17 @@ async fn find_pairing(args: FindPairingArgs) -> Result<()> {
     }
 
     if plist_files.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No .plist pairing files found in '{}'",
-            pairing_file_dir.display()
-        ));
+        return Err(anyhow::anyhow!("No .plist pairing files found"));
     }
 
     for pairing_file in plist_files {
         let rpf = RpPairingFile::read_from_file(pairing_file.clone()).await?;
 
-        if rpf.alt_irk.is_empty() {
+        if rpf.alt_irk.is_none() {
             continue; // skip invalid pairing files
         }
 
-        if rpf.validate_auth_tag(&identifier, bytes.as_slice()) {
+        if PeerDevice::validate_auth_tag(rpf.alt_irk().unwrap(), &identifier, &auto_tag) {
             println!(
                 "UDID: `{}`",
                 pairing_file
@@ -198,7 +201,7 @@ async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &
     let mut rpf = RpPairingFile::read_from_file(pairing_file)
         .await
         .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file.display(), e))?;
-    if rpf.alt_irk.is_empty() {
+    if rpf.alt_irk.is_none() {
         return Err(anyhow::anyhow!(
             "invalid pairing file '{}': alt_irk is empty",
             pairing_file.display()

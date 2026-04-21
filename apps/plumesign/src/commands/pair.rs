@@ -57,18 +57,14 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         .expect("Invalid PIN");
 
         let peer_device: &idevice::remote_pairing::PeerDevice =
-            rpc.peer_device().expect("Failed to get peer device");
-        let udid = peer_device
-            .remotepairing_udid
-            .as_deref()
-            .expect("Failed to get remotepairing_udid from peer device")
-            .to_string();
+            rpc.paired_peer_device().expect("Failed to get peer device");
+        let udid = peer_device.remotepairing_udid.clone();
         let peer_info_json = json!({
             "account_id": peer_device.account_id,
             "alt_irk": peer_device.alt_irk,
             "model": peer_device.model,
             "name": peer_device.name,
-            "remotepairing_udid": peer_device.remotepairing_udid,
+            "remotepairing_udid": udid,
         });
 
         (udid, peer_info_json)
