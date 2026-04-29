@@ -370,6 +370,12 @@ impl Device {
         F: FnMut(i32) -> Fut + Send + Clone + 'static,
         Fut: std::future::Future<Output = ()> + Send,
     {
+        let upload_callback = |(progress, _): (u64, ())| async move {
+            if progress % 5 == 0 {
+                log::info!("AFC upload progress: {}%", progress);
+            }
+        };
+
         let callback = move |(progress, _): (u64, ())| {
             let mut cb = progress_callback.clone();
             async move {
@@ -377,10 +383,18 @@ impl Device {
             }
         };
 
+        let upload_state = ();
         let state = ();
 
-        installation::install_package_with_callback_rsd(
-            provider, handshake, app_path, None, callback, state,
+        installation::install_package_with_upload_callback_rsd(
+            provider,
+            handshake,
+            app_path,
+            None,
+            upload_callback,
+            upload_state,
+            callback,
+            state,
         )
         .await?;
 

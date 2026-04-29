@@ -184,6 +184,73 @@ impl Package {
         }
     }
 
+    pub fn archive_bundle_dir(bundle_dir: &PathBuf) -> Result<PathBuf, Error> {
+        if !bundle_dir.is_dir() {
+            return Err(Error::Other(format!(
+                "Bundle directory does not exist: {}",
+                bundle_dir.display()
+            )));
+        }
+
+        let bundle_name = bundle_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .ok_or_else(|| {
+                Error::Other(format!(
+                    "Invalid bundle directory: {}",
+                    bundle_dir.display()
+                ))
+            })?;
+
+        let stage_dir = env::temp_dir().join(format!(
+            "plume_stage_{:08}",
+            Uuid::new_v4().to_string().to_uppercase()
+        ));
+        fs::create_dir_all(&stage_dir)?;
+
+        let zip_file_path = stage_dir.join("resigned.ipa");
+        let file = fs::File::create(&zip_file_path)?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        fn add_dir_to_zip(
+            zip: &mut zip::ZipWriter<fs::File>,
+            path: &PathBuf,
+            root: &PathBuf,
+            archive_root: &str,
+            options: &FileOptions<'_, zip::write::ExtendedFileOptions>,
+        ) -> Result<(), Error> {
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
+                let entry_path = entry.path();
+                let relative_name = entry_path
+                    .strip_prefix(root)
+                    .map_err(|_| Error::PackageInfoPlistMissing)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let name = format!("{archive_root}/{relative_name}");
+
+                if entry_path.is_file() {
+                    zip.start_file(&name, options.clone())?;
+                    let mut f = fs::File::open(&entry_path)?;
+                    std::io::copy(&mut f, zip)?;
+                } else if entry_path.is_dir() {
+                    zip.add_directory(format!("{name}/"), options.clone())?;
+                    add_dir_to_zip(zip, &entry_path, root, archive_root, options)?;
+                }
+            }
+
+            Ok(())
+        }
+
+        let archive_root = format!("Payload/{bundle_name}");
+        zip.add_directory(format!("{archive_root}/"), options.clone())?;
+        add_dir_to_zip(&mut zip, bundle_dir, bundle_dir, &archive_root, &options)?;
+        zip.finish()?;
+
+        Ok(zip_file_path)
+    }
+
     fn archive_package_bundle(self) -> Result<PathBuf, Error> {
         let zip_file_path = self.stage_dir.join("resigned.ipa");
         let file = fs::File::create(&zip_file_path)?;

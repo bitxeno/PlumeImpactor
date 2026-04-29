@@ -6,6 +6,7 @@ use clap::Args;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use plume_core::{CertificateIdentity, MobileProvision, developer::qh::devices::DeviceType};
 use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
+use std::fs;
 use std::{net::IpAddr, str::FromStr};
 
 use crate::{
@@ -226,16 +227,20 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
             if let Some(dev) = device {
                 log::info!("Installing to device: {}", dev.name);
+                log::info!("Prepare to archive bundle for installation...");
+                let archived_path = Package::archive_bundle_dir(&bundle.bundle_dir())?;
+                log::info!("Archiving complete. Starting upload to device...");
                 dev.install_app_rsd(
                     &mut handle,
                     &mut handshake,
-                    bundle.bundle_dir(),
+                    &archived_path,
                     |progress| async move {
                         log::info!("Installation progress: {}%", progress);
                     },
                 )
                 .await?;
 
+                fs::remove_dir_all(&archived_path).ok();
                 log::info!("Installation complete!");
             }
         }
@@ -245,16 +250,18 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
         if let Some(dev) = device {
             log::info!("Installing to device: {}", dev.name);
+            let archived_path = Package::archive_bundle_dir(&bundle.bundle_dir())?;
             dev.install_app_rsd(
                 &mut handle,
                 &mut handshake,
-                bundle.bundle_dir(),
+                &archived_path,
                 |progress| async move {
                     log::info!("Installation progress: {}%", progress);
                 },
             )
             .await?;
 
+            fs::remove_dir_all(&archived_path).ok();
             log::info!("Installation complete!");
         }
     }
