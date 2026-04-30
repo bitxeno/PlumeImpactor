@@ -361,18 +361,18 @@ fn print_device_info(value: &Value, personalized_image_mounted: bool) {
         .map(plist_value_as_bool)
         .unwrap_or(false);
 
-    println!("product type: {product_type}");
-    println!("product version: {product_version}");
-    println!(
-        "developer mode: {}",
+    log::info!("Product Type: {product_type}");
+    log::info!("Product Version: {product_version}");
+    log::info!(
+        "Developer Mode: {}",
         if developer_mode_enabled {
             "enabled"
         } else {
             "disabled"
         }
     );
-    println!(
-        "personalized image: {}",
+    log::info!(
+        "Personalized Image: {}",
         if personalized_image_mounted {
             "mounted"
         } else {
