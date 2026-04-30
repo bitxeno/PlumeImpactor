@@ -1,9 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Args;
 
+use idevice::RsdService;
+use idevice::lockdown::LockdownClient;
+use idevice::mobile_image_mounter::ImageMounter;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
+use plist::Value;
 use plume_core::{CertificateIdentity, MobileProvision, developer::qh::devices::DeviceType};
 use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
 use std::fs;
@@ -106,6 +110,23 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     let mut rpc = RemotePairingClient::new(conn, &host_name, &mut rpf);
 
     let (mut handle, mut handshake) = rpc.start_tunnel(&args.ip).await?;
+
+    let mut lockdown = LockdownClient::connect_rsd(&mut handle, &mut handshake).await?;
+    let mut value = lockdown.get_value(None, None).await?;
+    let devstatus = lockdown
+        .get_value(
+            Some("DeveloperModeStatus"),
+            Some("com.apple.security.mac.amfi"),
+        )
+        .await?;
+    if let Some(dict) = value.as_dictionary_mut() {
+        dict.insert("DeveloperModeStatus".to_string(), devstatus);
+    }
+    let mounted = match ImageMounter::connect_rsd(&mut handle, &mut handshake).await {
+        Ok(mut mounter_client) => mounter_client.lookup_image("Personalized").await.is_ok(),
+        Err(_) => false,
+    };
+    print_device_info(&value, mounted);
 
     use plume_utils::Device;
     let device = if args.register_and_install {
@@ -227,9 +248,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
             if let Some(dev) = device {
                 log::info!("Installing to device: {}", dev.name);
-                log::info!("Prepare to archive bundle for installation...");
-                let archived_path = Package::archive_bundle_dir(&bundle.bundle_dir())?;
-                log::info!("Archiving complete. Starting upload to device...");
+                let archived_path = archive_bundle_with_progress(&bundle.bundle_dir())?;
                 dev.install_app_rsd(
                     &mut handle,
                     &mut handshake,
@@ -250,7 +269,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
 
         if let Some(dev) = device {
             log::info!("Installing to device: {}", dev.name);
-            let archived_path = Package::archive_bundle_dir(&bundle.bundle_dir())?;
+            let archived_path = archive_bundle_with_progress(&bundle.bundle_dir())?;
             dev.install_app_rsd(
                 &mut handle,
                 &mut handshake,
@@ -287,4 +306,90 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn archive_bundle_with_progress(bundle_dir: &PathBuf) -> Result<PathBuf> {
+    let total_files = count_files(bundle_dir)?;
+    if total_files == 0 {
+        let archived_path = Package::archive_bundle_dir(bundle_dir)?;
+        log::info!("Archive bundle progress: 100%");
+        return Ok(archived_path);
+    }
+
+    let mut processed_files = 0usize;
+    let mut next_percent = 5u8;
+
+    Package::archive_bundle_dir_with_progress(bundle_dir, |_| {
+        processed_files += 1;
+
+        let current_percent = ((processed_files.saturating_mul(100)) / total_files).min(100) as u8;
+        while next_percent <= current_percent {
+            log::info!("Archive bundle progress: {}%", next_percent);
+            next_percent += 5;
+        }
+    })
+    .map_err(Into::into)
+}
+
+fn count_files(path: &Path) -> std::io::Result<usize> {
+    let metadata = fs::metadata(path)?;
+    if metadata.is_file() {
+        return Ok(1);
+    }
+
+    let mut total = 0usize;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        total = total.saturating_add(count_files(&entry.path())?);
+    }
+
+    Ok(total)
+}
+
+fn print_device_info(value: &Value, personalized_image_mounted: bool) {
+    let dict = value.as_dictionary();
+    let product_type = dict
+        .and_then(|dict| dict.get("ProductType"))
+        .and_then(|value| value.as_string())
+        .unwrap_or("unknown");
+    let product_version = dict
+        .and_then(|dict| dict.get("ProductVersion"))
+        .and_then(|value| value.as_string())
+        .unwrap_or("unknown");
+    let developer_mode_enabled = dict
+        .and_then(|dict| dict.get("DeveloperModeStatus"))
+        .map(plist_value_as_bool)
+        .unwrap_or(false);
+
+    println!("product type: {product_type}");
+    println!("product version: {product_version}");
+    println!(
+        "developer mode: {}",
+        if developer_mode_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    println!(
+        "personalized image: {}",
+        if personalized_image_mounted {
+            "mounted"
+        } else {
+            "not mounted"
+        }
+    );
+}
+
+fn plist_value_as_bool(value: &Value) -> bool {
+    match value {
+        Value::Boolean(enabled) => *enabled,
+        Value::Integer(number) => number
+            .as_signed()
+            .map(|value| value != 0)
+            .or_else(|| number.as_unsigned().map(|value| value != 0))
+            .unwrap_or(false),
+        Value::String(text) => text.eq_ignore_ascii_case("true") || text == "1",
+        _ => false,
+    }
 }

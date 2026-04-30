@@ -1,7 +1,7 @@
 use super::{Bundle, PlistInfoTrait};
 use crate::{Error, SignerApp, SignerOptions, cgbi};
 use plist::Dictionary;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs, io::Read};
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -185,6 +185,16 @@ impl Package {
     }
 
     pub fn archive_bundle_dir(bundle_dir: &PathBuf) -> Result<PathBuf, Error> {
+        Self::archive_bundle_dir_with_progress(bundle_dir, |_| {})
+    }
+
+    pub fn archive_bundle_dir_with_progress<F>(
+        bundle_dir: &PathBuf,
+        mut progress_callback: F,
+    ) -> Result<PathBuf, Error>
+    where
+        F: FnMut(&str),
+    {
         if !bundle_dir.is_dir() {
             return Err(Error::Other(format!(
                 "Bundle directory does not exist: {}",
@@ -213,13 +223,17 @@ impl Package {
         let mut zip = zip::ZipWriter::new(file);
         let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-        fn add_dir_to_zip(
+        fn add_dir_to_zip<F>(
             zip: &mut zip::ZipWriter<fs::File>,
-            path: &PathBuf,
-            root: &PathBuf,
+            path: &Path,
+            root: &Path,
             archive_root: &str,
             options: &FileOptions<'_, zip::write::ExtendedFileOptions>,
-        ) -> Result<(), Error> {
+            progress_callback: &mut F,
+        ) -> Result<(), Error>
+        where
+            F: FnMut(&str),
+        {
             for entry in fs::read_dir(path)? {
                 let entry = entry?;
                 let entry_path = entry.path();
@@ -231,12 +245,24 @@ impl Package {
                 let name = format!("{archive_root}/{relative_name}");
 
                 if entry_path.is_file() {
+                    let file_name = entry_path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(&relative_name);
                     zip.start_file(&name, options.clone())?;
                     let mut f = fs::File::open(&entry_path)?;
                     std::io::copy(&mut f, zip)?;
+                    progress_callback(file_name);
                 } else if entry_path.is_dir() {
                     zip.add_directory(format!("{name}/"), options.clone())?;
-                    add_dir_to_zip(zip, &entry_path, root, archive_root, options)?;
+                    add_dir_to_zip(
+                        zip,
+                        &entry_path,
+                        root,
+                        archive_root,
+                        options,
+                        progress_callback,
+                    )?;
                 }
             }
 
@@ -245,7 +271,14 @@ impl Package {
 
         let archive_root = format!("Payload/{bundle_name}");
         zip.add_directory(format!("{archive_root}/"), options.clone())?;
-        add_dir_to_zip(&mut zip, bundle_dir, bundle_dir, &archive_root, &options)?;
+        add_dir_to_zip(
+            &mut zip,
+            bundle_dir,
+            bundle_dir,
+            &archive_root,
+            &options,
+            &mut progress_callback,
+        )?;
         zip.finish()?;
 
         Ok(zip_file_path)
