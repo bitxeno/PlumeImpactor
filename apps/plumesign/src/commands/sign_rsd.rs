@@ -253,9 +253,8 @@ pub async fn execute(args: SignArgs) -> Result<()> {
                     &mut handle,
                     &mut handshake,
                     &archived_path,
-                    |progress| async move {
-                        log::info!("Installation progress: {}%", progress);
-                    },
+                    log_upload_progress,
+                    log_installation_progress,
                 )
                 .await?;
 
@@ -274,9 +273,8 @@ pub async fn execute(args: SignArgs) -> Result<()> {
                 &mut handle,
                 &mut handshake,
                 &archived_path,
-                |progress| async move {
-                    log::info!("Installation progress: {}%", progress);
-                },
+                log_upload_progress,
+                log_installation_progress,
             )
             .await?;
 
@@ -329,6 +327,16 @@ fn archive_bundle_with_progress(bundle_dir: &PathBuf) -> Result<PathBuf> {
         }
     })
     .map_err(Into::into)
+}
+
+async fn log_upload_progress(progress: i32) {
+    if progress % 5 == 0 {
+        log::info!("AFC upload progress: {}%", progress);
+    }
+}
+
+async fn log_installation_progress(progress: i32) {
+    log::info!("Installation progress: {}%", progress);
 }
 
 fn count_files(path: &Path) -> std::io::Result<usize> {

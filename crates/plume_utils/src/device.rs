@@ -359,20 +359,24 @@ impl Device {
         Ok(())
     }
 
-    pub async fn install_app_rsd<F, Fut>(
+    pub async fn install_app_rsd<U, UFut, F, Fut>(
         &self,
         provider: &mut impl RsdProvider,
         handshake: &mut rsd::RsdHandshake,
         app_path: &PathBuf,
+        upload_progress_callback: U,
         progress_callback: F,
     ) -> Result<(), Error>
     where
+        U: FnMut(i32) -> UFut + Send + Clone + 'static,
+        UFut: std::future::Future<Output = ()> + Send,
         F: FnMut(i32) -> Fut + Send + Clone + 'static,
         Fut: std::future::Future<Output = ()> + Send,
     {
-        let upload_callback = |(progress, _): (u64, ())| async move {
-            if progress % 5 == 0 {
-                log::info!("AFC upload progress: {}%", progress);
+        let upload_callback = move |(progress, _): (u64, ())| {
+            let mut cb = upload_progress_callback.clone();
+            async move {
+                cb(progress as i32).await;
             }
         };
 
