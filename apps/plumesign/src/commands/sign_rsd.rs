@@ -9,7 +9,7 @@ use idevice::mobile_image_mounter::ImageMounter;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use plist::Value;
 use plume_core::{CertificateIdentity, MobileProvision, developer::qh::devices::DeviceType};
-use plume_utils::{Bundle, Package, Signer, SignerMode, SignerOptions};
+use plume_utils::{Bundle, Package, PlistInfoTrait, Signer, SignerMode, SignerOptions};
 use std::fs;
 use std::{net::IpAddr, str::FromStr};
 
@@ -134,7 +134,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
             name: handshake
                 .properties
                 .get("DeviceClass")
-                .and_then(|v| v.as_string())
+                .and_then(|v: &Value| v.as_string())
                 .unwrap_or_default()
                 .to_string(),
             udid: handshake
@@ -178,6 +178,23 @@ pub async fn execute(args: SignArgs) -> Result<()> {
     if let Ok(app) = bundle.detect_app() {
         log::info!("Detected app type: {:?}", app);
         options.app = app;
+    }
+
+    let device_class = value
+        .as_dictionary()
+        .and_then(|dict| dict.get("DeviceClass"))
+        .and_then(|value| value.as_string())
+        .unwrap_or_default()
+        .to_string();
+    if !bundle.is_platform_compatible_with_device_type(DeviceType::from_string(&device_class)) {
+        let platform = bundle
+            .get_platform_name()
+            .unwrap_or_else(|| "unknown".to_string());
+        return Err(anyhow::anyhow!(
+            "{} bundle can't install to target device type: {}",
+            platform,
+            device_class
+        ));
     }
 
     let (mut signer, team_id_opt) = if let Some(ref pem_files) = args.pem_files {

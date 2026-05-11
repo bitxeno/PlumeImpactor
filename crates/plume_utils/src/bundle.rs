@@ -5,6 +5,7 @@ use goblin::mach::{
     header::{MH_MAGIC, MH_MAGIC_64},
 };
 use plist::Value;
+use plume_core::developer::qh::devices::DeviceType;
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone)]
@@ -206,6 +207,25 @@ impl Bundle {
             Ok(SignerApp::from_bundle_identifier(
                 self.get_bundle_identifier().as_deref(),
             ))
+        }
+    }
+}
+
+impl Bundle {
+    pub fn is_platform_compatible_with_device_type(&self, device_type: DeviceType) -> bool {
+        if let Some(platform) = self.get_platform_name() {
+            let s = platform.to_lowercase();
+
+            match device_type {
+                DeviceType::Any => true,
+                DeviceType::Ios => s.contains("iphone") || s.contains("ipad") || s.contains("ios"),
+                DeviceType::Tvos => s.contains("tvos") || s.contains("appletv"),
+                DeviceType::Watchos => s.contains("watchos") || s.contains("watch"),
+                DeviceType::Visionos => s.contains("visionos") || s.contains("vision"),
+            }
+        } else {
+            // If no DTPlatformName present, assume compatible
+            true
         }
     }
 }

@@ -144,6 +144,7 @@ pub enum DeviceType {
     Ios,
     Tvos,
     Watchos,
+    Visionos,
 }
 
 impl DeviceType {
@@ -155,6 +156,8 @@ impl DeviceType {
             Self::Tvos
         } else if s.contains("watchos") || s.contains("watch") {
             Self::Watchos
+        } else if s.contains("visionos") || s.contains("vision") {
+            Self::Visionos
         } else {
             Self::Any
         }
