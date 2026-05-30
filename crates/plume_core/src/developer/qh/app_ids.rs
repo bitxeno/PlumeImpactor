@@ -27,6 +27,10 @@ impl DeveloperSession {
         identifier: &String,
     ) -> Result<AppIDResponse, Error> {
         let endpoint = developer_endpoint!("/QH65B2/ios/addAppId.action");
+        let mut name = strip_invalid_chars(name);
+        if name.is_empty() {
+            name = strip_invalid_chars(identifier);
+        }
 
         let mut body = Dictionary::new();
         body.insert("teamId".to_string(), Value::String(team_id.clone()));
