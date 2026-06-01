@@ -40,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Pair(args) => commands::pair::execute(args).await?,
         Commands::Certificate(args) => commands::certificate::execute(args).await?,
         Commands::Check(args) => commands::check::execute(args).await?,
+        Commands::Mount(args) => commands::mount::execute(args).await?,
+        Commands::Screenshot(args) => commands::screenshot::execute(args).await?,
     }
 
     Ok(())

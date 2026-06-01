@@ -19,6 +19,10 @@ pub struct PairArgs {
     /// Device pairing service port
     #[arg(short = 'p', long = "port", value_name = "PORT")]
     pub port: u16,
+
+    /// Optional host identifier sent to the device during pairing
+    #[arg(short = 'H', long = "host", value_name = "HOST")]
+    pub host: Option<String>,
 }
 
 pub async fn execute(args: PairArgs) -> Result<()> {
@@ -28,11 +32,19 @@ pub async fn execute(args: PairArgs) -> Result<()> {
     log::info!("Starting remote pairing with {}:{}", ip, args.port);
     debug!("Received pairing arguments: {:?}", args);
 
-    let host = hostname::get()
-        .ok()
-        .and_then(|name| name.into_string().ok())
+    let host = args
+        .host
+        .as_deref()
+        .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "plumesign".to_string());
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            hostname::get()
+                .ok()
+                .and_then(|name| name.into_string().ok())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "plumesign".to_string())
+        });
     let mut pairing_file = RpPairingFile::generate(&host);
 
     let (udid, peer_info_json) = {
@@ -74,8 +86,8 @@ pub async fn execute(args: PairArgs) -> Result<()> {
     fs::create_dir_all(&pairing_file_dir)?;
 
     // save pairing file
-    let output = pairing_file_dir.join(format!("{}.plist", udid));
-    pairing_file.write_to_file(output).await?;
+    let output_path = pairing_file_dir.join(format!("{}.plist", udid));
+    pairing_file.write_to_file(output_path.clone()).await?;
 
     // save peer device info for reference
     let peer_info_output = pairing_file_dir.join(format!("{}.json", udid));
@@ -84,6 +96,9 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         serde_json::to_string_pretty(&peer_info_json)?,
     )?;
 
-    log::info!("SUCCESS: Remote pairing completed");
+    log::info!(
+        "SUCCESS: Remote pairing file saved to '{}'",
+        output_path.display()
+    );
     Ok(())
 }

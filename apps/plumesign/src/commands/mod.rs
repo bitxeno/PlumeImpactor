@@ -7,7 +7,9 @@ pub mod device;
 pub mod device_id;
 pub mod device_info;
 pub mod macho;
+pub mod mount;
 pub mod pair;
+pub mod screenshot;
 pub mod sign;
 pub mod sign_rsd;
 
@@ -48,4 +50,8 @@ pub enum Commands {
     Pair(pair::PairArgs),
     /// Check PublicStaging via AFC and list files
     Check(check::CheckArgs),
+    /// Mount a personalized developer disk image on an iOS device over an RSD tunnel
+    Mount(mount::MountArgs),
+    /// Take a screenshot from an iOS device over an RSD tunnel
+    Screenshot(screenshot::ScreenshotArgs),
 }
