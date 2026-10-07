@@ -44,6 +44,8 @@ pem-rfc7468 = "0.7"
 rcgen = "0.12"
 sha1 = "0.10"             # p12
 p12-keystore = "0.2"      # p12 crate only supports legacy PKCS#12
+der = "0.7"
+pkcs12 = "0.1"
 # Forks
 apple-codesign = { git = "https://github.com/bitxeno/apple-platform-rs", branch = "macho", package = "apple-codesign", default-features = false }
 omnisette = { path = "../../3rdparty/omnisette", features = [
@@ -62,3 +64,6 @@ reqwest = { version = "0.13", features = ["json", "gzip", "native-tls"] }
 [features]
 default = []
 tweaks = []
+
+[dev-dependencies]
+cms = "0.2"
