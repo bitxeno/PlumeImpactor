@@ -119,6 +119,31 @@ impl Bundle {
                 }
             }
 
+            // Keep BGTaskSchedulerPermittedIdentifiers under the new bundle
+            // identifier; otherwise background tasks fail to register.
+            if let Some(Value::Array(identifiers)) = dict.get("BGTaskSchedulerPermittedIdentifiers")
+            {
+                // Skip the whole key when any entry is not a string.
+                let task_ids: Option<Vec<String>> = identifiers
+                    .iter()
+                    .map(|item| item.as_string().map(str::to_owned))
+                    .collect();
+                if let Some(task_ids) = task_ids {
+                    let rewritten = rewritten_task_scheduler_identifiers(
+                        &task_ids,
+                        old_identifier,
+                        new_identifier,
+                    );
+                    if rewritten != task_ids {
+                        dict.insert(
+                            "BGTaskSchedulerPermittedIdentifiers".to_string(),
+                            Value::Array(rewritten.into_iter().map(Value::String).collect()),
+                        );
+                        did_change = true;
+                    }
+                }
+            }
+
             // NSExtension → NSExtensionAttributes → WKAppBundleIdentifier
             if let Some(Value::Dictionary(extension_dict)) = dict.get_mut("NSExtension") {
                 if let Some(Value::Dictionary(attributes)) =
@@ -145,6 +170,34 @@ impl Bundle {
 
         Ok(())
     }
+}
+
+/// Rewrites task identifiers based on the old bundle identifier to use the
+/// new one, preserving each task suffix. Other entries are kept as-is.
+fn rewritten_task_scheduler_identifiers(
+    task_ids: &[String],
+    old_identifier: &str,
+    new_identifier: &str,
+) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    let mut rewritten = Vec::with_capacity(task_ids.len());
+    for task_id in task_ids {
+        let new_task_id =
+            if task_id == new_identifier || task_id.starts_with(&format!("{new_identifier}.")) {
+                task_id.clone()
+            } else if task_id == old_identifier {
+                new_identifier.to_owned()
+            } else if let Some(suffix) = task_id.strip_prefix(&format!("{old_identifier}.")) {
+                format!("{new_identifier}.{suffix}")
+            } else {
+                task_id.clone()
+            };
+        if seen.insert(new_task_id.clone()) {
+            rewritten.push(new_task_id);
+        }
+    }
+    rewritten
 }
 
 macro_rules! get_plist_string {
