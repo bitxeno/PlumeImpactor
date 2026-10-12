@@ -223,7 +223,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "apple-bundles"
 version = "0.21.0"
-source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#ef7d5e068d6ebeb24624746843b8eba3208110ae"
+source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#c61b5a80d603d7cc4bd54b3f35c782476ccd7d07"
 dependencies = [
  "anyhow",
  "plist",
@@ -234,7 +234,7 @@ dependencies = [
 [[package]]
 name = "apple-codesign"
 version = "0.29.0"
-source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#ef7d5e068d6ebeb24624746843b8eba3208110ae"
+source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#c61b5a80d603d7cc4bd54b3f35c782476ccd7d07"
 dependencies = [
  "anyhow",
  "apple-bundles",
@@ -312,7 +312,7 @@ dependencies = [
 [[package]]
 name = "apple-flat-package"
 version = "0.20.0"
-source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#ef7d5e068d6ebeb24624746843b8eba3208110ae"
+source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#c61b5a80d603d7cc4bd54b3f35c782476ccd7d07"
 dependencies = [
  "apple-xar",
  "cpio-archive",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "apple-xar"
 version = "0.20.0"
-source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#ef7d5e068d6ebeb24624746843b8eba3208110ae"
+source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#c61b5a80d603d7cc4bd54b3f35c782476ccd7d07"
 dependencies = [
  "base64 0.22.1",
  "bcder",
@@ -1548,7 +1548,7 @@ dependencies = [
 [[package]]
 name = "cpio-archive"
 version = "0.10.0"
-source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#ef7d5e068d6ebeb24624746843b8eba3208110ae"
+source = "git+https://github.com/bitxeno/apple-platform-rs?branch=macho#c61b5a80d603d7cc4bd54b3f35c782476ccd7d07"
 dependencies = [
  "chrono",
  "is_executable",
@@ -3391,7 +3391,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3411,7 +3411,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -6005,7 +6005,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.35",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -6043,7 +6043,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -7292,7 +7292,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.112",
