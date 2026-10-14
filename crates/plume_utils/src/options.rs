@@ -171,6 +171,9 @@ pub enum SignerApp {
     EnsWilde,
     ByeTunes,
     StikStore,
+    Reynard,
+    Ksign,
+    AutoCapture,
 }
 
 impl std::fmt::Display for SignerApp {
@@ -189,6 +192,9 @@ impl std::fmt::Display for SignerApp {
             EnsWilde => "EnsWilde",
             ByeTunes => "ByeTunes",
             StikStore => "StikStore",
+            Reynard => "Reynard",
+            Ksign => "Ksign",
+            AutoCapture => "Dev Auto Capture",
         };
         write!(f, "{}", name)
     }
@@ -214,6 +220,9 @@ impl SignerApp {
             ("com.EduAlexxis.MusicManager", SignerApp::ByeTunes),
             ("me.stik.store", SignerApp::StikStore),
             ("app.stik.store", SignerApp::StikStore),
+            ("com.minh-ton.Reynard", SignerApp::Reynard),
+            ("nya.asami.ksign", SignerApp::Ksign),
+            ("com.halfeatentoast.devcapture", SignerApp::AutoCapture),
         ];
 
         for &(known_id, app) in KNOWN_APPS {
@@ -257,6 +266,9 @@ impl SignerApp {
             ("enswilde", SignerApp::EnsWilde),
             ("byetunes", SignerApp::ByeTunes),
             ("stikstore", SignerApp::StikStore),
+            ("reynard", SignerApp::Reynard),
+            ("ksign", SignerApp::Ksign),
+            ("dev auto capture", SignerApp::AutoCapture),
         ];
 
         for &(needle, app) in KNOWN_APP_NAMES {
@@ -281,14 +293,14 @@ impl SignerApp {
     pub fn pairing_file_path(&self) -> Option<&'static str> {
         use SignerApp::*;
         match self {
-            Antrag | Feather | Protokolle | StikDebug | SparseBox | EnsWilde | StikStore => {
-                Some("/Documents/pairingFile.plist")
-            }
+            Antrag | Feather | Protokolle | StikDebug | SparseBox | EnsWilde | StikStore
+            | Reynard | Ksign => Some("/Documents/pairingFile.plist"),
             SideStore => Some("/Documents/ALTPairingFile.mobiledevicepairing"),
             LiveContainerAndSideStore | LiveContainer => {
                 Some("/Documents/SideStore/Documents/ALTPairingFile.mobiledevicepairing")
             }
             ByeTunes => Some("/Documents/pairing file/pairingFile.plist"),
+            AutoCapture => Some("/Documents/rpPairingFile.plist"),
             _ => None,
         }
     }

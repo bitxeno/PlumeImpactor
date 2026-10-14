@@ -5,7 +5,10 @@ use iced::{Color, Element};
 use super::THEME_ICON_SIZE;
 
 pub(crate) fn load_fonts() -> Vec<std::borrow::Cow<'static, [u8]>> {
-    vec![include_bytes!("./plume_icons.ttf").as_slice().into()]
+    vec![
+        include_bytes!("./plume_icons.ttf").as_slice().into(),
+        include_bytes!("./Hack-Regular.ttf").as_slice().into(),
+    ]
 }
 
 pub(crate) const GEAR: &str = "\u{e800}";
@@ -20,7 +23,7 @@ pub(crate) const FILE: &str = "\u{f15b}";
 
 pub(crate) fn icon_text<M: 'static>(
     icon: &'static str,
-    label: &'static str,
+    label: std::borrow::Cow<'_, str>,
     color: Option<Color>,
 ) -> Element<'static, M> {
     let icon_font = Font {
@@ -39,8 +42,9 @@ pub(crate) fn icon_text<M: 'static>(
         icon_text_widget = icon_text_widget.color(c);
     }
     row = row.push(icon_text_widget);
+    let str = label.to_string();
 
-    let mut label_widget = Text::new(label);
+    let mut label_widget = Text::new(str);
     if let Some(c) = color {
         label_widget = label_widget.color(c);
     }

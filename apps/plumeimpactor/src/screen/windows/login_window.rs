@@ -1,8 +1,10 @@
 use iced::futures::SinkExt;
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Fill, Task, window};
+use plume_core::auth::{TwoFactorAction, TwoFactorMethod, TwoFactorRequest};
 use plume_core::{AnisetteConfiguration, auth::Account};
 use plume_store::{AccountStore, GsaAccount};
+use rust_i18n::t;
 use std::sync::mpsc as std_mpsc;
 
 use crate::appearance;
@@ -18,7 +20,11 @@ pub enum Message {
     TwoFactorCodeChanged(String),
     TwoFactorSubmit,
     TwoFactorCancel,
-    RequestTwoFactor,
+    SendCodeViaSms(u32),
+    RequestTwoFactor {
+        sms: bool,
+        phones: Vec<(u32, String)>,
+    },
 }
 
 pub struct LoginWindow {
@@ -30,13 +36,15 @@ pub struct LoginWindow {
     two_factor_error: Option<String>,
     is_logging_in: bool,
     show_two_factor: bool,
-    two_factor_tx: Option<std_mpsc::Sender<Result<String, String>>>,
+    two_factor_is_sms: bool,
+    trusted_phones: Vec<(u32, String)>,
+    two_factor_tx: Option<std_mpsc::Sender<Result<TwoFactorAction, String>>>,
 }
 
 impl LoginWindow {
     pub fn new() -> (Self, Task<Message>) {
         let (id, task) = window::open(window::Settings {
-            size: iced::Size::new(400.0, 300.0),
+            size: iced::Size::new(400.0, 360.0),
             position: window::Position::Centered,
             resizable: false,
             decorations: true,
@@ -53,6 +61,8 @@ impl LoginWindow {
                 two_factor_error: None,
                 is_logging_in: false,
                 show_two_factor: false,
+                two_factor_is_sms: false,
+                trusted_phones: Vec::new(),
                 two_factor_tx: None,
             },
             task.discard(),
@@ -87,14 +97,17 @@ impl LoginWindow {
                 let password = self.password.clone();
                 self.password.clear();
 
-                let (tx, rx) = std_mpsc::channel::<Result<String, String>>();
+                let (tx, rx) = std_mpsc::channel::<Result<TwoFactorAction, String>>();
                 self.two_factor_tx = Some(tx);
 
                 Task::run(Self::perform_login(email, password, rx), |msg| msg)
             }
-            Message::RequestTwoFactor => {
+            Message::RequestTwoFactor { sms, phones } => {
                 self.show_two_factor = true;
                 self.is_logging_in = false;
+                self.two_factor_is_sms = sms;
+                self.trusted_phones = phones;
+                self.two_factor_code.clear();
                 self.login_error = None;
                 self.two_factor_error = None;
                 Task::none()
@@ -151,8 +164,16 @@ impl LoginWindow {
                 }
 
                 if let Some(tx) = &self.two_factor_tx {
-                    let _ = tx.send(Ok(code));
+                    let _ = tx.send(Ok(TwoFactorAction::SubmitCode(code)));
                 }
+                self.is_logging_in = true;
+                Task::none()
+            }
+            Message::SendCodeViaSms(phone_id) => {
+                if let Some(tx) = &self.two_factor_tx {
+                    let _ = tx.send(Ok(TwoFactorAction::SendSms(phone_id)));
+                }
+                self.two_factor_error = None;
                 self.is_logging_in = true;
                 Task::none()
             }
@@ -178,12 +199,12 @@ impl LoginWindow {
     }
 
     fn view_login(&self) -> Element<'_, Message> {
-        let email_input = text_input("Email", &self.email)
+        let email_input = text_input("claration@riseup.net", &self.email)
             .on_input(Message::EmailChanged)
             .padding(8)
             .width(Fill);
 
-        let mut password_input = text_input("Password", &self.password)
+        let mut password_input = text_input("password", &self.password)
             .on_input(Message::PasswordChanged)
             .secure(true)
             .padding(8)
@@ -193,11 +214,10 @@ impl LoginWindow {
         }
 
         let mut content = column![
-            text("Your Apple ID is used to sign and install apps. Credentials sent only to Apple.")
-                .size(14),
-            text("Email:").size(14),
+            text(t!("login_only_set_to_fruit")).size(14),
+            text(t!("login_email")).size(14),
             email_input,
-            text("Password:").size(14),
+            text(t!("login_password")).size(14),
             password_input,
         ]
         .spacing(appearance::THEME_PADDING)
@@ -211,14 +231,14 @@ impl LoginWindow {
 
         let buttons = row![
             container(text("")).width(Fill),
-            button("Cancel")
+            button(text(t!("cancel")))
                 .on_press(Message::LoginCancel)
                 .style(appearance::s_button),
-            button(if self.is_logging_in {
-                "Logging In..."
+            button(text(if self.is_logging_in {
+                t!("login_loading")
             } else {
-                "Next"
-            })
+                t!("next")
+            }))
             .on_press_maybe(if self.is_logging_in {
                 None
             } else {
@@ -243,9 +263,15 @@ impl LoginWindow {
             code_input = code_input.on_submit(Message::TwoFactorSubmit);
         }
 
+        let description = if self.two_factor_is_sms {
+            t!("login_two_fa_sms_desc")
+        } else {
+            t!("login_two_fa_desc")
+        };
+
         let mut content = column![
-            text("Two-Factor Authentication").size(20),
-            text("Enter the verification code sent to your device:").size(14),
+            text(t!("login_two_fa")).size(20),
+            text(description).size(14),
             code_input,
         ]
         .spacing(appearance::THEME_PADDING)
@@ -258,16 +284,36 @@ impl LoginWindow {
             }));
         }
 
+        if !self.trusted_phones.is_empty() {
+            content = content.push(text(t!("login_no_code")).size(13));
+            for (id, last_two) in &self.trusted_phones {
+                let label = if last_two.is_empty() {
+                    t!("login_send_sms").to_string()
+                } else {
+                    format!("{} \u{2022}\u{2022}{}", t!("login_send_sms"), last_two)
+                };
+                let sms_button = button(text(label).size(13))
+                    .on_press_maybe(if self.is_logging_in {
+                        None
+                    } else {
+                        Some(Message::SendCodeViaSms(*id))
+                    })
+                    .style(appearance::s_button)
+                    .padding(6);
+                content = content.push(sms_button);
+            }
+        }
+
         let buttons = row![
-            button("Cancel")
+            button(text(t!("cancel")))
                 .on_press(Message::TwoFactorCancel)
                 .style(appearance::s_button)
                 .padding(8),
-            button(if self.is_logging_in {
-                "Verifying..."
+            button(text(if self.is_logging_in {
+                t!("login_verifying")
             } else {
-                "Verify"
-            })
+                t!("login_verify")
+            }))
             .on_press_maybe(if self.is_logging_in {
                 None
             } else {
@@ -285,7 +331,7 @@ impl LoginWindow {
     fn perform_login(
         email: String,
         password: String,
-        two_factor_rx: std_mpsc::Receiver<Result<String, String>>,
+        two_factor_rx: std_mpsc::Receiver<Result<TwoFactorAction, String>>,
     ) -> impl iced::futures::Stream<Item = Message> {
         iced::stream::channel(
             10,
@@ -304,8 +350,14 @@ impl LoginWindow {
 
                     let account_result = rt.block_on(Account::login(
                         || Ok((email_clone.clone(), password.clone())),
-                        || {
-                            let _ = bridge_tx.send(Message::RequestTwoFactor);
+                        |request: TwoFactorRequest| {
+                            let phones = request
+                                .trusted_phone_numbers
+                                .iter()
+                                .map(|p| (p.id, p.last_two_digits.clone()))
+                                .collect();
+                            let sms = request.method == TwoFactorMethod::Sms;
+                            let _ = bridge_tx.send(Message::RequestTwoFactor { sms, phones });
 
                             match two_factor_rx.recv() {
                                 Ok(result) => result,

@@ -13,6 +13,8 @@ pub struct AccountStore {
     accounts: HashMap<String, GsaAccount>, // Email -> GsaAccount
     #[serde(default)]
     refreshes: HashMap<String, RefreshDevice>, // UDID -> RefreshDevice (apps?)
+    #[serde(default)]
+    locale: Option<String>, // None = system locale
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -136,6 +138,15 @@ impl AccountStore {
         } else {
             None
         }
+    }
+
+    pub fn locale(&self) -> Option<&str> {
+        self.locale.as_deref()
+    }
+
+    pub fn set_locale_sync(&mut self, locale: Option<String>) -> Result<(), Error> {
+        self.locale = locale;
+        self.save_sync()
     }
 
     pub async fn accounts_add_from_session(

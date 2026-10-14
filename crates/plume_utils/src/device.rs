@@ -318,6 +318,16 @@ impl Device {
                 .connect(async |_| "000000".to_string(), ())
                 .await?;
 
+            let tunnel_service_stream = cdp_adapter.connect(tunnel_service.port).await?;
+            let mut remote_xpc = RemoteXpcClient::new(tunnel_service_stream).await?;
+            remote_xpc.do_handshake().await?;
+            let _ = remote_xpc.recv_root().await;
+            let mut pairing_client =
+                RemotePairingClient::new(remote_xpc, &hostname, &mut pairing_file);
+            pairing_client
+                .connect(async |_| "000000".to_string(), ())
+                .await?;
+
             let pairing_file_bytes = pairing_file.to_bytes();
 
             tokio::fs::write(&pairing_file_path, &pairing_file_bytes).await?;

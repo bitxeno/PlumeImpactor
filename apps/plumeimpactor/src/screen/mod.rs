@@ -85,6 +85,7 @@ pub enum Message {
 pub struct Impactor {
     current_screen: ImpactorScreen,
     previous_screen: Option<Box<ImpactorScreen>>,
+    installer_screen: Option<package::PackageScreen>,
     devices: Vec<Device>,
     selected_device: Option<Device>,
     tray: Option<ImpactorTray>,
@@ -93,6 +94,7 @@ pub struct Impactor {
     login_windows: std::collections::HashMap<window::Id, login_window::LoginWindow>,
     pending_installation: bool,
     certificate_reset_queue: VecDeque<crate::certificate_reset::ConfirmationRequest>,
+    selected_locale: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +119,10 @@ impl Impactor {
         let mut tray = ImpactorTray::new();
         let store = Self::init_account_store_sync();
         tray.update_refresh_apps(&store);
+        let selected_locale = store.locale().map(str::to_string);
+        if let Some(code) = &selected_locale {
+            rust_i18n::set_locale(code);
+        }
         let start_in_tray = crate::startup::start_in_tray_from_args();
         let (main_window, open_task) = if start_in_tray {
             (None, Task::none())
@@ -131,6 +137,7 @@ impl Impactor {
             Self {
                 current_screen: ImpactorScreen::Main(general::GeneralScreen::new()),
                 previous_screen: None,
+                installer_screen: None,
                 devices: Vec::new(),
                 selected_device: None,
                 tray: Some(tray),
@@ -139,6 +146,7 @@ impl Impactor {
                 login_windows: std::collections::HashMap::new(),
                 pending_installation: false,
                 certificate_reset_queue: VecDeque::new(),
+                selected_locale,
             },
             open_task,
         )
@@ -296,7 +304,11 @@ impl Impactor {
                     Task::none()
                 }
                 ImpactorScreen::Progress(_) => {
-                    self.navigate_to_screen(ImpactorScreenType::Main);
+                    if let Some(installer) = self.installer_screen.take() {
+                        self.current_screen = ImpactorScreen::Installer(installer);
+                    } else {
+                        self.navigate_to_screen(ImpactorScreenType::Main);
+                    }
                     Task::none()
                 }
                 ImpactorScreen::Settings(_) => {
@@ -572,6 +584,20 @@ impl Impactor {
                             }
                             screen.update(msg).map(Message::SettingsScreen)
                         }
+                        settings::Message::SelectLocale(choice) => {
+                            self.selected_locale = choice.clone();
+                            let effective = choice
+                                .clone()
+                                .or_else(|| current_locale::current_locale().ok())
+                                .unwrap_or_else(|| "en".to_string());
+                            rust_i18n::set_locale(&effective);
+                            if let Some(store) = &mut self.account_store {
+                                if let Err(err) = store.set_locale_sync(choice) {
+                                    log::error!("Failed to persist locale: {err}");
+                                }
+                            }
+                            Task::none()
+                        }
                         _ => screen.update(msg).map(Message::SettingsScreen),
                     }
                 } else {
@@ -835,7 +861,7 @@ impl Impactor {
             ImpactorScreen::Main(screen) => screen.view().map(Message::MainScreen),
             ImpactorScreen::Utilities(screen) => screen.view().map(Message::UtilitiesScreen),
             ImpactorScreen::Settings(screen) => screen
-                .view(&self.account_store)
+                .view(&self.account_store, &self.selected_locale)
                 .map(Message::SettingsScreen),
             ImpactorScreen::Installer(screen) => {
                 screen.view(has_device).map(Message::InstallerScreen)
@@ -940,9 +966,10 @@ impl Impactor {
         match screen_type {
             ImpactorScreenType::Main => {
                 if let ImpactorScreen::Installer(installer) = &self.current_screen {
-                    if let Some(package) = installer.selected_package.clone() {
-                        package.remove_package_stage();
-                    }
+                    Self::cleanup_package_stage(installer);
+                }
+                if let Some(installer) = self.installer_screen.take() {
+                    Self::cleanup_package_stage(&installer);
                 }
 
                 self.current_screen = ImpactorScreen::Main(general::GeneralScreen::new());
@@ -959,6 +986,15 @@ impl Impactor {
                 self.current_screen = ImpactorScreen::Progress(progress::ProgressScreen::new());
             }
             _ => {}
+        }
+    }
+
+    fn cleanup_package_stage(installer: &package::PackageScreen) {
+        if std::env::var("PLUME_DELETE_AFTER_FINISHED").is_ok() {
+            return;
+        }
+        if let Some(package) = installer.selected_package.clone() {
+            package.remove_package_stage();
         }
     }
 
@@ -981,7 +1017,16 @@ impl Impactor {
 
             let mut progress_screen = progress::ProgressScreen::new();
             progress_screen.start_installation(progress_rx.clone());
-            self.current_screen = ImpactorScreen::Progress(progress_screen);
+
+            let previous = std::mem::replace(
+                &mut self.current_screen,
+                ImpactorScreen::Progress(progress_screen),
+            );
+            if let ImpactorScreen::Installer(installer) = previous {
+                if let Some(stale) = self.installer_screen.replace(installer) {
+                    Self::cleanup_package_stage(&stale);
+                }
+            }
 
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
@@ -999,17 +1044,9 @@ impl Impactor {
                     {
                         Ok(_) => {
                             let _ = tx.send(("Installation complete!".to_string(), 100));
-
-                            if std::env::var("PLUME_DELETE_AFTER_FINISHED").is_err() {
-                                package.remove_package_stage();
-                            }
                         }
                         Err(e) => {
                             let _ = tx_error.send((format!("Error: {}", e), -1));
-
-                            if std::env::var("PLUME_DELETE_AFTER_FINISHED").is_err() {
-                                package.remove_package_stage();
-                            }
                         }
                     }
                 });

@@ -15,8 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Dependencies
+        run: |
+          sudo apt update 
+          sudo apt install -y gh libxml2-utils
+          mkdir upload
+
       - name: Update metainfo
-        run: ./update_meta.sh
+        run: |
+          ./update_meta.sh
 
       - name: Commit and merge in changes
         run: |

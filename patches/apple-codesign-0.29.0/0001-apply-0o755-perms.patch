@@ -1,0 +1,120 @@
+From 428b42f059bbf0b17104f9ad448b5dab3ef79f53 Mon Sep 17 00:00:00 2001
+From: khcrysalis <sam4r16@gmail.com>
+Date: Sat, 20 Dec 2025 02:48:09 -0800
+Subject: [PATCH] fix: apply 0o775 permissions
+
+---
+ src/bundle_signing.rs | 21 ++++++++++++++++-----
+ src/lib.rs            |  2 +-
+ src/macho.rs          | 13 +++++++++++++
+ src/signing.rs        |  9 +++++++++
+ 4 files changed, 39 insertions(+), 6 deletions(-)
+
+diff --git a/src/bundle_signing.rs b/src/bundle_signing.rs
+index e00f55c85..b6e3e864e 100644
+--- a/src/bundle_signing.rs
++++ b/src/bundle_signing.rs
+@@ -469,6 +469,14 @@ impl<'a, 'key> BundleSigningContext<'a, 'key> {
+     ) -> Result<(PathBuf, SignedMachOInfo), AppleCodesignError> {
+         warn!("signing Mach-O file {}", bundle_rel_path.display());
+ 
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::PermissionsExt;
++            let mut perms = std::fs::metadata(source_path)?.permissions();
++            perms.set_mode(0o755);
++            std::fs::set_permissions(source_path, perms)?;
++        }
++
+         let macho_data = std::fs::read(source_path)?;
+         let signer = MachOSigner::new(&macho_data)?;
+ 
+@@ -607,11 +615,6 @@ impl SingleBundleSigner {
+             dest_dir.join("Contents")
+         };
+ 
+-        self.bundle
+-            .identifier()
+-            .map_err(AppleCodesignError::DirectoryBundle)?
+-            .ok_or_else(|| AppleCodesignError::BundleNoIdentifier(self.bundle.info_plist_path()))?;
+-
+         let mut resources_digests = settings.all_digests(SettingsScope::Main);
+ 
+         // State in the main executable can influence signing settings of the bundle. So examine
+@@ -723,6 +726,14 @@ impl SingleBundleSigner {
+         if let Some(exe) = main_exe {
+             warn!("signing main executable {}", exe.relative_path().display());
+ 
++            #[cfg(unix)]
++            {
++                use std::os::unix::fs::PermissionsExt;
++                let mut perms = std::fs::metadata(exe.absolute_path())?.permissions();
++                perms.set_mode(0o755);
++                std::fs::set_permissions(exe.absolute_path(), perms)?;
++            }
++
+             let macho_data = std::fs::read(exe.absolute_path())?;
+             let signer = MachOSigner::new(&macho_data)?;
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index da18117e6..8c72bd29a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -143,7 +143,7 @@ pub use macos::*;
+ mod macho_signing;
+ pub use macho_signing::*;
+ mod macho_universal;
+-pub use macho_universal::UniversalBinaryBuilder;
++pub use macho_universal::*;
+ #[cfg(feature = "notarize")]
+ pub mod notarization;
+ #[cfg(feature = "notarize")]
+diff --git a/src/macho.rs b/src/macho.rs
+index 31bc6f580..ad6c74624 100644
+--- a/src/macho.rs
++++ b/src/macho.rs
+@@ -646,11 +646,24 @@ impl<'a> MachFile<'a> {
+         self.machos.iter()
+     }
+ 
++    pub fn iter_macho_mut(&mut self) -> impl Iterator<Item = &mut MachOBinary<'a>> + '_ {
++        self.machos.iter_mut()
++    }
++
+     pub fn nth_macho(&self, index: usize) -> Result<&MachOBinary<'a>, AppleCodesignError> {
+         self.machos
+             .get(index)
+             .ok_or(AppleCodesignError::InvalidMachOIndex(index))
+     }
++
++    pub fn nth_macho_mut(
++        &mut self,
++        index: usize,
++    ) -> Result<&mut MachOBinary<'a>, AppleCodesignError> {
++        self.machos
++            .get_mut(index)
++            .ok_or(AppleCodesignError::InvalidMachOIndex(index))
++    }
+ }
+ 
+ impl<'a> IntoIterator for MachFile<'a> {
+diff --git a/src/signing.rs b/src/signing.rs
+index 5d6b4f4d9..6ea511b58 100644
+--- a/src/signing.rs
++++ b/src/signing.rs
+@@ -66,6 +66,15 @@ impl<'key> UnifiedSigner<'key> {
+         let output_path = output_path.as_ref();
+ 
+         warn!("signing {} as a Mach-O binary", input_path.display());
++
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::PermissionsExt;
++            let mut perms = std::fs::metadata(input_path)?.permissions();
++            perms.set_mode(0o755);
++            std::fs::set_permissions(input_path, perms)?;
++        }
++
+         let macho_data = std::fs::read(input_path)?;
+ 
+         let mut settings = self.settings.clone();

@@ -3,6 +3,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Center, Element, Fill, Task};
 use plume_utils::{Package, PlistInfoTrait, SignerInstallMode, SignerMode, SignerOptions};
+use rust_i18n::t;
 use std::path::PathBuf;
 use tiny_skia::{FillRule, Mask, Path, PathBuilder, Transform};
 
@@ -26,6 +27,7 @@ pub enum Message {
     UpdateInstallMode(SignerInstallMode),
     AddTweak,
     AddBundle,
+    SelectedPaths(SelectionKind, Vec<PathBuf>),
     RemoveTweak(usize),
     SetCustomIcon,
     ClearCustomIcon,
@@ -33,6 +35,14 @@ pub enum Message {
     ClearCustomEntitlements,
     Back,
     RequestInstallation,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SelectionKind {
+    Tweak,
+    Bundle,
+    Image,
+    Entitlements,
 }
 
 #[derive(Debug, Clone)]
@@ -52,9 +62,7 @@ impl PackageScreen {
             .and_then(|data| icon_handle_from_bytes(data));
 
         let custom_icon_path = options.custom_icon.clone();
-        let custom_icon_handle = custom_icon_path
-            .as_ref()
-            .and_then(icon_handle_from_path);
+        let custom_icon_handle = custom_icon_path.as_ref().and_then(icon_handle_from_path);
 
         Self {
             selected_package: package,
@@ -153,33 +161,55 @@ impl PackageScreen {
                 self.options.install_mode = mode;
                 Task::none()
             }
-            Message::AddTweak => {
-                let path = rfd::FileDialog::new()
-                    .add_filter("Tweak files", &["deb", "dylib"])
-                    .set_title("Select Tweak File")
-                    .pick_file();
+            Message::AddTweak => Task::perform(
+                async {
+                    rfd::FileDialog::new()
+                        .add_filter("Tweak files", &["deb", "dylib"])
+                        .set_title("Select Tweak File(s)")
+                        .pick_files()
+                },
+                |paths| Message::SelectedPaths(SelectionKind::Tweak, paths.unwrap_or_default()),
+            ),
+            Message::AddBundle => Task::perform(
+                async {
+                    rfd::FileDialog::new()
+                        .set_title("Select Bundle Folder(s)")
+                        .pick_folders()
+                        .unwrap_or_default()
+                },
+                |paths| Message::SelectedPaths(SelectionKind::Bundle, paths),
+            ),
+            Message::SelectedPaths(kind, paths) => {
+                match kind {
+                    SelectionKind::Tweak => match &mut self.options.tweaks {
+                        Some(tweaks) => tweaks.extend(paths),
+                        None => self.options.tweaks = Some(paths),
+                    },
 
-                if let Some(path) = path {
-                    match &mut self.options.tweaks {
-                        Some(vec) => vec.push(path),
-                        None => self.options.tweaks = Some(vec![path]),
-                    }
-                }
-
-                Task::none()
-            }
-            Message::AddBundle => {
-                let path = rfd::FileDialog::new()
-                    .set_title("Select Bundle Folder")
-                    .pick_folder();
-
-                if let Some(path) = path {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if ["framework", "bundle", "appex"].contains(&ext) {
-                            match &mut self.options.tweaks {
-                                Some(vec) => vec.push(path),
-                                None => self.options.tweaks = Some(vec![path]),
+                    SelectionKind::Bundle => {
+                        for path in paths {
+                            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                                if ["framework", "bundle", "appex"].contains(&ext) {
+                                    match &mut self.options.tweaks {
+                                        Some(tweaks) => tweaks.push(path),
+                                        None => self.options.tweaks = Some(vec![path]),
+                                    }
+                                }
                             }
+                        }
+                    }
+                    SelectionKind::Image => {
+                        let path = paths.into_iter().next();
+                        if let Some(path) = path {
+                            self.options.custom_icon = Some(path.clone());
+                            self.custom_icon_path = Some(path.clone());
+                            self.custom_icon_handle = icon_handle_from_path(&path);
+                        }
+                    }
+                    SelectionKind::Entitlements => {
+                        let path = paths.into_iter().next();
+                        if let Some(path) = path {
+                            self.options.custom_entitlements = Some(path);
                         }
                     }
                 }
@@ -194,38 +224,32 @@ impl PackageScreen {
                 }
                 Task::none()
             }
-            Message::SetCustomIcon => {
-                let path = rfd::FileDialog::new()
-                    .add_filter("Image files", &["png", "jpg", "jpeg"])
-                    .set_title("Select App Icon")
-                    .pick_file();
-
-                if let Some(path) = path {
-                    self.options.custom_icon = Some(path.clone());
-                    self.custom_icon_path = Some(path.clone());
-                    self.custom_icon_handle = icon_handle_from_path(&path);
-                }
-
-                Task::none()
-            }
+            Message::SetCustomIcon => Task::perform(
+                async {
+                    rfd::FileDialog::new()
+                        .add_filter("Image files", &["png", "jpg", "jpeg"])
+                        .set_title("Select App Icon")
+                        .pick_file()
+                },
+                |path| Message::SelectedPaths(SelectionKind::Image, path.into_iter().collect()),
+            ),
             Message::ClearCustomIcon => {
                 self.options.custom_icon = None;
                 self.custom_icon_path = None;
                 self.custom_icon_handle = None;
                 Task::none()
             }
-            Message::SetCustomEntitlements => {
-                let path = rfd::FileDialog::new()
-                    .add_filter("Entitlements plist", &["plist", "xml"])
-                    .set_title("Select Entitlements File")
-                    .pick_file();
-
-                if let Some(path) = path {
-                    self.options.custom_entitlements = Some(path);
-                }
-
-                Task::none()
-            }
+            Message::SetCustomEntitlements => Task::perform(
+                async {
+                    rfd::FileDialog::new()
+                        .add_filter("Entitlements plist", &["plist", "xml", "entitlements"])
+                        .set_title("Select Entitlements File")
+                        .pick_file()
+                },
+                |path| {
+                    Message::SelectedPaths(SelectionKind::Entitlements, path.into_iter().collect())
+                },
+            ),
             Message::ClearCustomEntitlements => {
                 self.options.custom_entitlements = None;
                 Task::none()
@@ -257,8 +281,8 @@ impl PackageScreen {
 
     fn view_no_package(&self) -> Element<'_, Message> {
         column![
-            text("No package selected").size(32),
-            text("Go back and select a file").size(16),
+            text(t!("options_no_package")).size(32),
+            text(t!("options_go_back_and_get_package")).size(16),
         ]
         .spacing(appearance::THEME_PADDING)
         .align_x(Center)
@@ -274,9 +298,9 @@ impl PackageScreen {
             row![
                 self.view_custom_icon(),
                 column![
-                    text("Name:").size(12),
+                    text(t!("options_name")).size(12),
                     text_input(
-                        "App name",
+                        "example",
                         self.options.custom_name.as_ref().unwrap_or(&pkg_name)
                     )
                     .on_input(Message::UpdateCustomName)
@@ -285,32 +309,40 @@ impl PackageScreen {
                 .spacing(8),
             ]
             .spacing(8),
-            text("Identifier:").size(12),
+            text(t!("options_identifier")).size(12),
             text_input(
-                "Bundle identifier",
+                "com.example.app",
                 self.options.custom_identifier.as_ref().unwrap_or(&pkg_id)
             )
             .on_input(Message::UpdateCustomIdentifier)
             .padding(8),
-            text("Version:").size(12),
+            text(t!("options_version")).size(12),
             text_input(
-                "Version",
+                "1.0.0",
                 self.options.custom_version.as_ref().unwrap_or(&pkg_ver)
             )
             .on_input(Message::UpdateCustomVersion)
             .padding(8),
-            text("Entitlements:").size(12),
+            text(t!("options_entitlements")).size(12),
             self.view_custom_entitlements(),
-            text("Only available if \"Only Register Main Bundle\" is enabled.").size(11),
-            text("Tweaks:").size(12),
+            text(t!("options_entitlements_warn")).size(11),
+            text(t!("options_tweaks")).size(12),
             self.view_tweaks(),
             row![
-                button(appearance::icon_text(appearance::PLUS, "Add Tweak", None))
-                    .on_press(Message::AddTweak)
-                    .style(appearance::s_button),
-                button(appearance::icon_text(appearance::PLUS, "Add Bundle", None))
-                    .on_press(Message::AddBundle)
-                    .style(appearance::s_button),
+                button(appearance::icon_text(
+                    appearance::PLUS,
+                    t!("options_add_tweak"),
+                    None
+                ))
+                .on_press(Message::AddTweak)
+                .style(appearance::s_button),
+                button(appearance::icon_text(
+                    appearance::PLUS,
+                    t!("options_add_bundle"),
+                    None
+                ))
+                .on_press(Message::AddBundle)
+                .style(appearance::s_button),
             ]
             .spacing(8),
         ]
@@ -321,51 +353,51 @@ impl PackageScreen {
 
     fn view_options_column(&self) -> Element<'_, Message> {
         column![
-            text("General:").size(12),
+            text(t!("options_general")).size(12),
             checkbox(self.options.features.support_minimum_os_version)
-                .label("Support older versions (7+)")
+                .label(t!("options_support_versions"))
                 .on_toggle(Message::ToggleMinimumOsVersion),
             checkbox(self.options.features.support_file_sharing)
-                .label("Force File Sharing")
+                .label(t!("options_file_sharing"))
                 .on_toggle(Message::ToggleFileSharing),
             checkbox(self.options.features.support_ipad_fullscreen)
-                .label("Force iPad Fullscreen")
+                .label(t!("options_ipad_fullscreen"))
                 .on_toggle(Message::ToggleIpadFullscreen),
             checkbox(self.options.features.support_game_mode)
-                .label("Force Game Mode")
+                .label(t!("options_game_mode"))
                 .on_toggle(Message::ToggleGameMode),
             checkbox(self.options.features.support_pro_motion)
-                .label("Force Pro Motion")
+                .label(t!("options_pro_motion"))
                 .on_toggle(Message::ToggleProMotion),
-            text("Advanced:").size(12),
+            text(t!("options_advanced")).size(12),
             checkbox(self.options.embedding.single_profile)
-                .label("Only Register Main Bundle")
+                .label(t!("options_register_main_bundle"))
                 .on_toggle(Message::ToggleSingleProfile),
             checkbox(self.options.features.support_liquid_glass)
-                .label("Force Liquid Glass (26+)")
+                .label(t!("options_liquid_glass"))
                 .on_toggle(Message::ToggleLiquidGlass),
             checkbox(self.options.features.support_ellekit)
-                .label("Replace Substrate with ElleKit")
+                .label(t!("options_ellekit"))
                 .on_toggle(Message::ToggleElleKit),
             checkbox(self.options.refresh)
-                .label("Auto Refresh [BETA]")
+                .label(t!("options_auto_refresh"))
                 .on_toggle(Message::ToggleRefresh),
-            text("Mode:").size(12),
+            text(t!("options_mode")).size(12),
             pick_list(
                 &[SignerInstallMode::Install, SignerInstallMode::Export][..],
                 Some(self.options.install_mode),
                 Message::UpdateInstallMode
             )
             .style(appearance::s_pick_list)
-            .placeholder("Select mode"),
-            text("Signing:").size(12),
+            .placeholder(t!("options_mode_desc")),
+            text(t!("options_signing")).size(12),
             pick_list(
                 &[SignerMode::Pem, SignerMode::Adhoc, SignerMode::None][..],
                 Some(self.options.mode),
                 Message::UpdateSignerMode
             )
             .style(appearance::s_pick_list)
-            .placeholder("Select signing method"),
+            .placeholder(t!("options_signing_desc")),
         ]
         .spacing(8)
         .width(Fill)
@@ -374,15 +406,15 @@ impl PackageScreen {
 
     fn view_buttons(&self, has_device: bool) -> Element<'_, Message> {
         let (button_enabled, button_label) = match self.options.install_mode {
-            SignerInstallMode::Install => (has_device, "Install"),
-            SignerInstallMode::Export => (true, "Export"),
+            SignerInstallMode::Install => (has_device, t!("install")),
+            SignerInstallMode::Export => (true, t!("export")),
         };
 
         container(
             row![
                 button(appearance::icon_text(
                     appearance::CHEVRON_BACK,
-                    "Back",
+                    t!("back"),
                     None
                 ))
                 .on_press(Message::Back)
@@ -505,14 +537,15 @@ impl PackageScreen {
                 let tweak_row = row![
                     text(tweak.file_name().and_then(|n| n.to_str()).unwrap_or("???"))
                         .size(12)
-                        .width(Fill),
+                        .width(Fill)
+                        .wrapping(text::Wrapping::WordOrGlyph),
                     button(appearance::icon(appearance::MINUS))
                         .on_press(Message::RemoveTweak(i))
                         .style(appearance::s_button)
                         .padding(6)
                 ]
                 .spacing(8)
-                .align_y(Alignment::Center);
+                .align_y(Alignment::Start);
 
                 tweak_list = tweak_list.push(tweak_row);
             }

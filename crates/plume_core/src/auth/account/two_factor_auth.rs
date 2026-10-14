@@ -84,8 +84,6 @@ impl Account {
     }
 
     pub async fn verify_2fa(&self, code: String) -> Result<LoginState, Error> {
-        log::debug!("Verifying SMS 2FA with code: {}", code);
-
         let headers = self.build_2fa_headers(false);
         let res = self
             .client
@@ -110,8 +108,6 @@ impl Account {
         code: String,
         mut body: VerifyBody,
     ) -> Result<LoginState, Error> {
-        log::debug!("Verifying SMS 2FA with code: {}", code);
-
         let headers = self.build_2fa_headers(true).await;
         body.security_code = Some(VerifyCode { code });
         let res = self

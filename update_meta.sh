@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ------------------------------------------------------------
-# Config
-# ------------------------------------------------------------
 REPO="claration/Impactor"
 API="https://api.github.com/repos/$REPO/releases"
 OUT_DIR="upload"
@@ -11,18 +8,12 @@ OUT_FILE="$OUT_DIR/dev.khcrysalis.PlumeImpactor.metainfo.xml"
 
 mkdir -p "$OUT_DIR"
 
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
 xml_escape() {
   sed -e 's/&/\&amp;/g' \
       -e 's/</\&lt;/g' \
       -e 's/>/\&gt;/g'
 }
 
-# ------------------------------------------------------------
-# Fetch releases
-# ------------------------------------------------------------
 echo "Fetching releases…"
 RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" "$API")"
 
@@ -34,9 +25,6 @@ BODY="$(echo "$LATEST_RELEASE" | jq -r '.body')"
 
 echo "Latest version: $VERSION ($DATE)"
 
-# ------------------------------------------------------------
-# Download an existing metainfo.xml from releases
-# ------------------------------------------------------------
 META_URL="$(
   echo "$RELEASES_JSON" |
     jq -r '
@@ -56,17 +44,11 @@ fi
 echo "Downloading existing metainfo.xml…"
 curl -fsSL "$META_URL" -o "$OUT_FILE"
 
-# ------------------------------------------------------------
-# Abort if release already exists
-# ------------------------------------------------------------
 if xmllint --xpath "//release[@version='$VERSION']" "$OUT_FILE" >/dev/null 2>&1; then
   echo "Latest release already present, nothing to do"
   exit 0
 fi
 
-# ------------------------------------------------------------
-# Build <description> XML
-# ------------------------------------------------------------
 DESCRIPTION_TMP="$(mktemp)"
 IN_LIST=0
 
@@ -93,9 +75,6 @@ done <<< "$BODY"
 
 [[ $IN_LIST -eq 1 ]] && echo "</ul>" >> "$DESCRIPTION_TMP"
 
-# ------------------------------------------------------------
-# Create <release> block
-# ------------------------------------------------------------
 RELEASE_TMP="$(mktemp)"
 cat > "$RELEASE_TMP" <<EOF
 <release version="$VERSION" date="$DATE">
@@ -106,9 +85,6 @@ $(sed 's/^/    /' "$DESCRIPTION_TMP")
 </release>
 EOF
 
-# ------------------------------------------------------------
-# Insert release after <releases>
-# ------------------------------------------------------------
 OUTPUT_TMP="$(mktemp)"
 
 awk '
@@ -125,14 +101,8 @@ awk '
 
 mv "$OUTPUT_TMP" "$OUT_FILE"
 
-# ------------------------------------------------------------
-# Format XML
-# ------------------------------------------------------------
 xmllint --format "$OUT_FILE" --output "$OUT_FILE"
 
-# ------------------------------------------------------------
-# Cleanup
-# ------------------------------------------------------------
 rm -f "$DESCRIPTION_TMP" "$RELEASE_TMP"
 
 echo "✅ Updated metainfo written to $OUT_FILE"

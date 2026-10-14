@@ -35,7 +35,8 @@ pub(crate) fn default_window_settings() -> window::Settings {
     let platform_specific = window::settings::PlatformSpecific::default();
 
     window::Settings {
-        size: iced::Size::new(575.0, 410.0),
+        // Sized to fit the installer screen (the tallest) without scrolling.
+        size: iced::Size::new(575.0, 475.0),
         position: window::Position::Centered,
         exit_on_close_request: false,
         resizable: false,
@@ -60,7 +61,9 @@ pub fn get_data_path() -> PathBuf {
     let base = if cfg!(windows) {
         env::var("APPDATA").unwrap()
     } else {
-        env::var("HOME").unwrap() + "/.config"
+        env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+            env::var("HOME").unwrap() + "/.config"
+        })
     };
 
     let dir = Path::new(&base).join("PlumeImpactor");

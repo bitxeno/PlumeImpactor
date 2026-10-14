@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Fill, Task};
 use plume_store::AccountStore;
+use rust_i18n::t;
 
 use crate::appearance;
 
@@ -28,6 +29,39 @@ pub enum Message {
     FetchTeams(String),
     TeamsLoaded(String, Vec<Team>),
     ToggleAutoStart(bool),
+    SelectLocale(Option<String>),
+    ResetAnisetteData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocaleChoice {
+    code: Option<String>,
+}
+
+impl LocaleChoice {
+    fn system() -> Self {
+        Self { code: None }
+    }
+
+    fn explicit(code: String) -> Self {
+        Self { code: Some(code) }
+    }
+
+    fn code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
+}
+
+impl std::fmt::Display for LocaleChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.code {
+            None => write!(f, "{}", rust_i18n::t!("settings_system_language")),
+            Some(code) => {
+                let name = rust_i18n::t!("_language_name", locale = code);
+                write!(f, "{}", name)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -57,13 +91,23 @@ impl SettingsScreen {
             }
             Message::ToggleAutoStart(_) => Task::none(),
             Message::SelectTeam(_, _) => Task::none(),
+            Message::SelectLocale(_) => Task::none(),
+            Message::ResetAnisetteData => {
+                let path = crate::defaults::get_data_path().join("state.plist");
+                let _ = std::fs::remove_file(path);
+                Task::none()
+            }
             _ => Task::none(),
         }
     }
 
-    pub fn view<'a>(&'a self, account_store: &'a Option<AccountStore>) -> Element<'a, Message> {
+    pub fn view<'a>(
+        &'a self,
+        account_store: &'a Option<AccountStore>,
+        selected_locale: &'a Option<String>,
+    ) -> Element<'a, Message> {
         let Some(store) = account_store else {
-            return column![text("Loading accounts...")]
+            return column![text(t!("settings_loading_accounts"))]
                 .spacing(appearance::THEME_PADDING)
                 .padding(appearance::THEME_PADDING)
                 .into();
@@ -116,11 +160,11 @@ impl SettingsScreen {
                         };
 
                         let placeholder = if is_loading {
-                            "Loading teams...".to_string()
+                            t!("settings_select_teams").to_string()
                         } else if !team_id.is_empty() {
                             team_id.to_string()
                         } else {
-                            "Select team...".to_string()
+                            t!("settings_loading_teams").to_string()
                         };
 
                         let email_owned = email.to_string();
@@ -130,7 +174,8 @@ impl SettingsScreen {
                         })
                         .placeholder(placeholder)
                         .on_open(Message::FetchTeams(email.to_string()))
-                        .style(appearance::s_pick_list);
+                        .style(appearance::s_pick_list)
+                        .width(Fill);
 
                         account_row = account_row.push(team_pick);
                     }
@@ -150,28 +195,71 @@ impl SettingsScreen {
                 },
             ));
         } else {
-            content = content.push(text("No accounts added yet"));
+            content = content.push(text(t!("settings_no_accounts_yet")));
         }
 
         let auto_start_enabled = crate::startup::auto_start_enabled();
         content = content.push(self.view_auto_start_toggle(auto_start_enabled));
+        content = content.push(self.view_language_picker(selected_locale));
         content = content.push(self.view_account_buttons(selected_index));
+        content = content.push(
+            button(appearance::icon_text(
+                appearance::MINUS,
+                t!("settings_reset_adi"),
+                None,
+            ))
+            .on_press(Message::ResetAnisetteData)
+            .style(appearance::s_button),
+        );
 
         content.into()
     }
 
     fn view_auto_start_toggle(&self, auto_start_enabled: bool) -> Element<'_, Message> {
         checkbox(auto_start_enabled)
-            .label("Launch on Startup")
+            .label(t!("settings_launch_on_startup"))
             .on_toggle(Message::ToggleAutoStart)
+            .into()
+    }
+
+    fn view_language_picker<'a>(
+        &'a self,
+        selected_locale: &'a Option<String>,
+    ) -> Element<'a, Message> {
+        let mut codes: Vec<String> = rust_i18n::available_locales!()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        codes.sort();
+
+        let mut choices: Vec<LocaleChoice> = Vec::with_capacity(codes.len() + 1);
+        choices.push(LocaleChoice::system());
+        choices.extend(codes.into_iter().map(LocaleChoice::explicit));
+
+        let current = match selected_locale {
+            None => LocaleChoice::system(),
+            Some(code) => LocaleChoice::explicit(code.clone()),
+        };
+
+        let picker = pick_list(choices, Some(current), |choice: LocaleChoice| {
+            Message::SelectLocale(choice.code().map(|s| s.to_string()))
+        })
+        .style(appearance::s_pick_list);
+
+        column![text(t!("settings_language")), picker]
+            .spacing(appearance::THEME_PADDING)
             .into()
     }
 
     fn view_account_buttons(&self, selected_index: Option<usize>) -> Element<'_, Message> {
         let mut buttons = row![
-            button(appearance::icon_text(appearance::PLUS, "Add Account", None))
-                .on_press(Message::ShowLogin)
-                .style(appearance::s_button)
+            button(appearance::icon_text(
+                appearance::PLUS,
+                t!("settings_add_account"),
+                None
+            ))
+            .on_press(Message::ShowLogin)
+            .style(appearance::s_button)
         ]
         .spacing(appearance::THEME_PADDING);
 
@@ -180,16 +268,20 @@ impl SettingsScreen {
                 .push(
                     button(appearance::icon_text(
                         appearance::MINUS,
-                        "Remove Account",
+                        t!("settings_remove_account"),
                         None,
                     ))
                     .on_press(Message::RemoveAccount(index))
                     .style(appearance::s_button),
                 )
                 .push(
-                    button(appearance::icon_text(appearance::SHARE, "Export P12", None))
-                        .on_press(Message::ExportP12)
-                        .style(appearance::s_button),
+                    button(appearance::icon_text(
+                        appearance::SHARE,
+                        t!("settings_export_p12"),
+                        None,
+                    ))
+                    .on_press(Message::ExportP12)
+                    .style(appearance::s_button),
                 );
         }
 
