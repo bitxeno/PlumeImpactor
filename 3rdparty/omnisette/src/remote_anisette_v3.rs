@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, fs, io::Cursor, path::PathBuf};
 
+use crate::adi_proxy::{CLIENT_INFO_HEADER, LOOKUP_CLIENT_INFO};
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine;
@@ -188,12 +189,13 @@ impl AnisetteClient {
     pub async fn new(url: String) -> Result<AnisetteClient, AnisetteError> {
         let path = format!("{}/v3/client_info", url);
         let http_client = make_reqwest()?;
-        let client_info = http_client
+        let mut client_info = http_client
             .get(path)
             .send()
             .await?
             .json::<AnisetteClientInfo>()
             .await?;
+        client_info.client_info = CLIENT_INFO_HEADER.to_string();
         Ok(AnisetteClient { client_info, url })
     }
 
@@ -201,11 +203,12 @@ impl AnisetteClient {
         &self,
         state: &AnisetteState,
         builder: RequestBuilder,
+        client_info: &str,
     ) -> RequestBuilder {
         let dt: DateTime<Utc> = Utc::now().round_subsecs(0);
 
         builder
-            .header("X-Mme-Client-Info", &self.client_info.client_info)
+            .header("X-Mme-Client-Info", client_info)
             .header("User-Agent", &self.client_info.user_agent)
             .header("Content-Type", "text/x-xml-plist")
             .header("X-Apple-I-MD-LU", encode_hex(&state.md_lu()))
@@ -287,6 +290,7 @@ impl AnisetteClient {
             .build_apple_request(
                 &state,
                 http_client.get("https://gsa.apple.com/grandslam/GsService2/lookup"),
+                LOOKUP_CLIENT_INFO,
             )
             .send()
             .await?;
@@ -362,7 +366,11 @@ impl AnisetteClient {
                             request: Dictionary::new(),
                         };
                         let resp = self
-                            .build_apple_request(state, http_client.post(start_provisioning_url))
+                            .build_apple_request(
+                                state,
+                                http_client.post(start_provisioning_url),
+                                &self.client_info.client_info,
+                            )
                             .body(plist_to_string(&body_data)?)
                             .send()
                             .await?;
@@ -400,7 +408,11 @@ impl AnisetteClient {
                             request: Dictionary::from_iter([("cpim", cpim)].into_iter()),
                         };
                         let resp = self
-                            .build_apple_request(state, http_client.post(end_provisioning_url))
+                            .build_apple_request(
+                                state,
+                                http_client.post(end_provisioning_url),
+                                &self.client_info.client_info,
+                            )
                             .body(plist_to_string(&body_data)?)
                             .send()
                             .await?;
