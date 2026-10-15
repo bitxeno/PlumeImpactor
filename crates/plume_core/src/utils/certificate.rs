@@ -568,6 +568,71 @@ impl CertificateIdentity {
         Ok(p12_data)
     }
 
+    fn extract_unlinked_pkcs12_key_bag(p12_data: &[u8]) -> der::Result<Option<Vec<u8>>> {
+        use der::{
+            Decode, Encode,
+            asn1::{ContextSpecific, ObjectIdentifier, OctetString},
+        };
+        use pkcs12::{
+            authenticated_safe::AuthenticatedSafe,
+            pfx::Pfx,
+            safe_bag::{PrivateKeyInfo, SafeContents},
+        };
+
+        let data_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.1");
+        let key_bag_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.12.10.1.1");
+
+        let pfx = Pfx::from_der(p12_data)?;
+        if pfx.auth_safe.content_type != data_oid {
+            return Ok(None);
+        }
+
+        let auth_safe_der = OctetString::from_der(&pfx.auth_safe.content.to_der()?)?.into_bytes();
+        let auth_safe = AuthenticatedSafe::from_der(&auth_safe_der)?;
+
+        for safe in auth_safe {
+            if safe.content_type != data_oid {
+                continue;
+            }
+
+            let safe_der = OctetString::from_der(&safe.content.to_der()?)?.into_bytes();
+            let bags = SafeContents::from_der(&safe_der)?;
+
+            for bag in bags {
+                if bag.bag_id != key_bag_oid {
+                    continue;
+                }
+
+                let key: ContextSpecific<PrivateKeyInfo> =
+                    ContextSpecific::from_der(&bag.bag_value)?;
+                return Ok(Some(key.value.to_der()?));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn extract_pkcs12_private_key(p12_data: &[u8], password: &str) -> Result<Vec<u8>, Error> {
+        let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
+            .map_err(|e| Error::Certificate(format!("Failed to parse P12: {:?}", e)))?;
+
+        for (_, entry) in keystore.entries() {
+            if let p12_keystore::KeyStoreEntry::PrivateKeyChain(chain) = entry {
+                return Ok(chain.key().to_vec());
+            }
+        }
+
+        if let Some(key) = Self::extract_unlinked_pkcs12_key_bag(p12_data)
+            .map_err(|e| Error::Certificate(format!("Failed to parse P12 key bag: {:?}", e)))?
+        {
+            return Ok(key);
+        }
+
+        Err(Error::Certificate(
+            "No private key found in P12 file".into(),
+        ))
+    }
+
     pub async fn import_pkcs12(
         session: &DeveloperSession,
         config_path: PathBuf,
@@ -575,21 +640,7 @@ impl CertificateIdentity {
         p12_data: &[u8],
         password: &str,
     ) -> Result<(), Error> {
-        // Parse P12 using p12_keystore
-        let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
-            .map_err(|e| Error::Certificate(format!("Failed to parse P12: {:?}", e)))?;
-
-        // Extract the first private key chain we find
-        let mut found_key = None;
-        for (_, entry) in keystore.entries() {
-            if let p12_keystore::KeyStoreEntry::PrivateKeyChain(chain) = entry {
-                found_key = Some(chain.key().to_vec());
-                break;
-            }
-        }
-
-        let key_der = found_key
-            .ok_or_else(|| Error::Certificate("No private key found in P12 file".into()))?;
+        let key_der = Self::extract_pkcs12_private_key(p12_data, password)?;
 
         let certificates = session.qh_list_certs(&team_id).await?.certificates;
         let parsed_key = RsaPrivateKey::from_pkcs8_der(&key_der)
@@ -648,5 +699,155 @@ impl CertificateIdentity {
         Err(Error::Certificate(
             "No matching certificate found for the provided P12".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod issue_195_pkcs12_tests {
+    use super::*;
+
+    use cms::content_info::ContentInfo;
+    use der::{
+        Any, Decode, Encode,
+        asn1::{ObjectIdentifier, OctetString},
+    };
+    use pkcs12::{
+        authenticated_safe::AuthenticatedSafe,
+        cert_type::CertBag,
+        pfx::{Pfx, Version},
+        safe_bag::{SafeBag, SafeContents},
+    };
+
+    fn data_content(payload: Vec<u8>) -> ContentInfo {
+        let data_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.1");
+        let octets = OctetString::new(payload).unwrap();
+        let octets_der = octets.to_der().unwrap();
+
+        ContentInfo {
+            content_type: data_oid,
+            content: Any::from_der(&octets_der).unwrap(),
+        }
+    }
+
+    fn certificate_der(key: &RsaPrivateKey) -> Vec<u8> {
+        let key_der = key.to_pkcs8_der().unwrap();
+        let key_pair = KeyPair::from_der(key_der.as_bytes()).unwrap();
+
+        let mut params = rcgen::CertificateParams::new(vec![]);
+        params.alg = &PKCS_RSA_SHA256;
+        params.key_pair = Some(key_pair);
+        params.not_before = rcgen::date_time_ymd(2025, 1, 1);
+        params.not_after = rcgen::date_time_ymd(2035, 1, 1);
+
+        rcgen::Certificate::from_params(params)
+            .unwrap()
+            .serialize_der()
+            .unwrap()
+    }
+
+    fn sidestore_style_p12(key: &RsaPrivateKey) -> Vec<u8> {
+        let key_bag_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.12.10.1.1");
+        let cert_bag_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.12.10.1.3");
+        let x509_cert_oid = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.22.1");
+
+        let key_der = key.to_pkcs8_der().unwrap().as_bytes().to_vec();
+        let key_bag = SafeBag {
+            bag_id: key_bag_oid,
+            bag_value: key_der.clone(),
+            bag_attributes: None,
+        };
+        let key_safe: SafeContents = vec![key_bag];
+
+        let cert_der = certificate_der(key);
+
+        let cert_bag_value = CertBag {
+            cert_id: x509_cert_oid,
+            cert_value: OctetString::new(cert_der).unwrap(),
+        }
+        .to_der()
+        .unwrap();
+
+        let cert_bag = SafeBag {
+            bag_id: cert_bag_oid,
+            bag_value: cert_bag_value,
+            bag_attributes: None,
+        };
+        let cert_safe: SafeContents = vec![cert_bag];
+
+        let authenticated_safe: AuthenticatedSafe = vec![
+            data_content(key_safe.to_der().unwrap()),
+            data_content(cert_safe.to_der().unwrap()),
+        ];
+
+        let pfx = Pfx {
+            version: Version::V3,
+            auth_safe: data_content(authenticated_safe.to_der().unwrap()),
+            mac_data: None,
+        };
+
+        pfx.to_der().unwrap()
+    }
+
+    #[test]
+    fn issue_195_imports_sidestore_key_bag_without_local_key_id() {
+        let key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let p12 = sidestore_style_p12(&key);
+
+        let keystore = p12_keystore::KeyStore::from_pkcs12(&p12, "ignored").unwrap();
+        assert!(
+            !keystore
+                .entries()
+                .any(|(_, entry)| matches!(entry, p12_keystore::KeyStoreEntry::PrivateKeyChain(_))),
+            "fixture must reproduce p12-keystore dropping SideStore's unlinked keyBag"
+        );
+
+        let extracted = CertificateIdentity::extract_pkcs12_private_key(&p12, "ignored").unwrap();
+
+        assert_eq!(
+            extracted,
+            key.to_pkcs8_der().unwrap().as_bytes(),
+            "fallback must recover the exact PKCS#8 private key"
+        );
+    }
+
+    #[test]
+    fn issue_195_existing_linked_p12_path_still_works() {
+        let key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let key_der = key.to_pkcs8_der().unwrap().as_bytes().to_vec();
+        let cert = p12_keystore::Certificate::from_der(&certificate_der(&key)).unwrap();
+
+        let chain = p12_keystore::PrivateKeyChain::new(key_der.clone(), [1, 2, 3, 4], vec![cert]);
+        let mut keystore = p12_keystore::KeyStore::new();
+        keystore.add_entry(
+            "linked",
+            p12_keystore::KeyStoreEntry::PrivateKeyChain(chain),
+        );
+
+        let p12 = keystore.writer("secret").write().unwrap();
+
+        let extracted = CertificateIdentity::extract_pkcs12_private_key(&p12, "secret").unwrap();
+        assert_eq!(extracted, key_der);
+
+        assert!(
+            CertificateIdentity::extract_pkcs12_private_key(&p12, "wrong-password").is_err(),
+            "existing password validation must remain intact"
+        );
+    }
+
+    #[test]
+    fn issue_195_certificate_only_p12_still_has_no_private_key() {
+        let pfx = Pfx {
+            version: Version::V3,
+            auth_safe: data_content(Vec::<ContentInfo>::new().to_der().unwrap()),
+            mac_data: None,
+        }
+        .to_der()
+        .unwrap();
+
+        let err = CertificateIdentity::extract_pkcs12_private_key(&pfx, "").unwrap_err();
+        assert!(
+            err.to_string().contains("No private key found in P12 file"),
+            "unexpected error: {err}"
+        );
     }
 }
