@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod account;
+pub mod app;
 pub mod certificate;
 pub mod check;
 pub mod device;
@@ -54,6 +55,8 @@ pub enum Commands {
     Mount(mount::MountArgs),
     /// Take a screenshot from an iOS device over an RSD tunnel
     Screenshot(screenshot::ScreenshotArgs),
+    /// App management commands
+    App(app::AppArgs),
 }
 
 /// Builds the certificate-reset callback for one signing run.

@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Check(args) => commands::check::execute(args).await?,
         Commands::Mount(args) => commands::mount::execute(args).await?,
         Commands::Screenshot(args) => commands::screenshot::execute(args).await?,
+        Commands::App(args) => commands::app::execute(args).await?,
     }
 
     Ok(())
