@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use idevice::RsdService;
 use idevice::dvt::message::AuxValue;
+use idevice::mobile_image_mounter::ImageMounter;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use plist::{Dictionary, Value};
 
@@ -124,6 +125,19 @@ async fn enable_jit(args: EnableJitArgs) -> Result<()> {
 
     let (mut provider, mut handshake) = rpc.start_tunnel(&args.ip).await?;
 
+    // DVT instruments and debugproxy live in the Personalized developer
+    // image. Fail early with a clear hint instead of an obscure service
+    // error later.
+    let mounted = match ImageMounter::connect_rsd(&mut provider, &mut handshake).await {
+        Ok(mut mounter) => mounter.lookup_image("Personalized").await.is_ok(),
+        Err(_) => false,
+    };
+    if !mounted {
+        return Err(anyhow::anyhow!(
+            "Personalized developer image is not mounted; mount it first with 'plumesign mount'"
+        ));
+    }
+
     // Resolve the bundle identifier against installed apps. Signing appends
     // ".<team_id>" to the original identifier, so launching with the original
     // ID misses; fall back to prefix matching in that case.
@@ -149,7 +163,10 @@ async fn enable_jit(args: EnableJitArgs) -> Result<()> {
 
         let mut options = Dictionary::new();
         options.insert("StartSuspendedKey".to_string(), Value::Boolean(false));
-        options.insert("KillExisting".to_string(), Value::Boolean(true));
+        // Never kill an already-running instance: launching with
+        // KillExisting=false returns the existing PID, and (re-)attaching
+        // the debugger is harmless, so JIT is ensured either way.
+        options.insert("KillExisting".to_string(), Value::Boolean(false));
 
         channel
             .call_method(
