@@ -8,7 +8,10 @@ mod windows;
 use std::collections::VecDeque;
 
 use iced::Length::Fill;
+use iced::widget::operation::{focus_next,focus_previous};
 use iced::widget::{button, column, container, pick_list, row, stack, text};
+use iced::event::{self, Event, Status};
+use iced::keyboard::{self, Key, key};
 use iced::window;
 use iced::{Element, Subscription, Task};
 
@@ -34,6 +37,7 @@ pub enum Message {
     NavigateToScreen(ImpactorScreenType),
     NextScreen,
     PreviousScreen,
+    TabPressed { shift: bool },
 
     // Device management
     ComboBoxSelected(String),
@@ -280,6 +284,14 @@ impl Impactor {
                 }
 
                 Task::none()
+            }
+
+            Message::TabPressed { shift } => {
+                if shift {
+                    focus_previous()
+                } else {
+                    focus_next()
+                }
             }
             Message::NextScreen => {
                 let next_screen = match self.current_screen {
@@ -811,6 +823,18 @@ impl Impactor {
                 Subscription::none()
             };
 
+        let tab_subscription = event::listen_with(|event, status, _window| match (event, status) {
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: Key::Named(key::Named::Tab),
+                    modifiers,
+                    ..
+                }),
+                Status::Ignored,
+            ) => Some(Message::TabPressed { shift: modifiers.shift() }),
+            _ => None,
+        });
+
         let tray_menu_refresh_subscription = subscriptions::tray_menu_refresh_subscription();
         let certificate_reset_subscription = subscriptions::certificate_reset_subscription();
         let relaunch_subscription = subscriptions::relaunch_subscription();
@@ -822,6 +846,19 @@ impl Impactor {
             None
         });
 
+
+        event::listen_with(|event, status, _window| match (event, status) {
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: Key::Named(key::Named::Tab),
+                    modifiers,
+                    ..
+                }),
+                Status::Ignored,
+            ) => Some(Message::TabPressed { shift: modifiers.shift() }),
+            _ => None,
+        });
+
         Subscription::batch(vec![
             device_subscription,
             tray_subscription,
@@ -831,6 +868,7 @@ impl Impactor {
             certificate_reset_subscription,
             relaunch_subscription,
             close_subscription,
+            tab_subscription,
         ])
     }
 
