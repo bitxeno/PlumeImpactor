@@ -49,7 +49,10 @@ impl Account {
         tfa_closure: impl Fn(TwoFactorRequest) -> Result<TwoFactorAction, String>,
         config: AnisetteConfiguration,
     ) -> Result<Account, Error> {
-        let anisette = AnisetteData::new(config).await?;
+        // Login always provisions a fresh `adi_pb` with the identity the
+        // anisette server currently advertises.  The resulting token is bound
+        // to that identity; refreshes then keep using it.
+        let anisette = AnisetteData::new_for_login(config).await?;
         Account::login_with_anisette(appleid_closure, tfa_closure, anisette).await
     }
 

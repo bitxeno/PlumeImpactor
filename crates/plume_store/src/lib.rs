@@ -1,3 +1,4 @@
+pub mod anisette_paths;
 mod gsa_account;
 mod refresh;
 mod store;

@@ -36,6 +36,19 @@ impl AnisetteData {
         })
     }
 
+    /// Used by login: provisions a fresh `adi_pb` with the current server
+    /// identity instead of reusing the account's existing state.
+    pub async fn new_for_login(config: AnisetteConfiguration) -> Result<Self, Error> {
+        let mut b = AnisetteHeaders::get_login_anisette_headers_provider(config.clone())?;
+        let base_headers = b.provider.get_authentication_headers().await?;
+
+        Ok(AnisetteData {
+            base_headers,
+            generated_at: SystemTime::now(),
+            config,
+        })
+    }
+
     pub fn needs_refresh(&self) -> bool {
         let elapsed = self.generated_at.elapsed().unwrap();
         elapsed.as_secs() > 60

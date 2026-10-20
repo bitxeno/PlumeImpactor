@@ -1,8 +1,8 @@
 // Implementing the SideStore Anisette v3 protocol
 
-use std::{collections::HashMap, fs, io::Cursor, path::PathBuf};
+use std::{collections::HashMap, fs, io::Cursor, path::PathBuf, time::Duration};
 
-use crate::adi_proxy::{CLIENT_INFO_HEADER, LOOKUP_CLIENT_INFO};
+use crate::adi_proxy::{AKD_USER_AGENT, LOOKUP_CLIENT_INFO};
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine;
@@ -11,7 +11,7 @@ use futures_util::{stream::StreamExt, SinkExt};
 use log::debug;
 use plist::{Data, Dictionary};
 use rand::Rng;
-use reqwest::{Client, ClientBuilder, RequestBuilder};
+use reqwest::{Client, ClientBuilder, RequestBuilder, Response};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
@@ -83,6 +83,17 @@ struct AnisetteClientInfo {
     user_agent: String,
 }
 
+/// The client identity used by the stock (pre-server-identity) anisette flow.
+///
+/// Apple binds the developer session token (`xcode_gs_token`) to the
+/// `X-Mme-Client-Info` that was used when the token was issued.  Every state
+/// written before this field existed was provisioned with this identity, so
+/// it has to be kept as the fallback; otherwise old accounts start failing
+/// with `1100 Your session has expired` as soon as the header changes.
+pub const LEGACY_CLIENT_INFO: &str =
+    "<Pixel 7> <Android;14;UQ1A.240205.002> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+pub const LEGACY_USER_AGENT: &str = "akd/1.0 CFNetwork/808.1.4";
+
 #[derive(Serialize, Deserialize)]
 pub struct AnisetteState {
     #[serde(
@@ -92,9 +103,16 @@ pub struct AnisetteState {
     keychain_identifier: [u8; 16],
     #[serde(
         serialize_with = "bin_serialize_opt",
-        deserialize_with = "bin_deserialize_opt"
+        deserialize_with = "bin_deserialize_opt",
+        default
     )]
     adi_pb: Option<Vec<u8>>,
+    /// Identity this `adi_pb` was provisioned with.  `None` for states written
+    /// by older versions, which are treated as [`LEGACY_CLIENT_INFO`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_info: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_agent: Option<String>,
 }
 
 impl Default for AnisetteState {
@@ -102,6 +120,8 @@ impl Default for AnisetteState {
         AnisetteState {
             keychain_identifier: rand::rng().random::<[u8; 16]>(),
             adi_pb: None,
+            client_info: None,
+            user_agent: None,
         }
     }
 }
@@ -111,8 +131,50 @@ impl AnisetteState {
         AnisetteState::default()
     }
 
+    pub fn with_identifier(keychain_identifier: [u8; 16]) -> AnisetteState {
+        AnisetteState {
+            keychain_identifier,
+            ..AnisetteState::default()
+        }
+    }
+
     pub fn is_provisioned(&self) -> bool {
         self.adi_pb.is_some()
+    }
+
+    /// Identity to use for Apple requests, falling back to the legacy one for
+    /// states that predate identity tracking.
+    fn identity(&self) -> (&str, &str) {
+        (
+            self.client_info.as_deref().unwrap_or(LEGACY_CLIENT_INFO),
+            self.user_agent.as_deref().unwrap_or(LEGACY_USER_AGENT),
+        )
+    }
+
+    /// Record the identity that was used to provision `adi_pb`.
+    pub fn set_identity(&mut self, client_info: String, user_agent: String) {
+        self.client_info = Some(client_info);
+        self.user_agent = Some(user_agent);
+    }
+
+    /// True for states written by versions that did not track identity.
+    pub fn has_recorded_identity(&self) -> bool {
+        self.client_info.is_some()
+    }
+
+    #[doc(hidden)]
+    pub fn identity_for_test(&self) -> (&str, &str) {
+        self.identity()
+    }
+
+    #[doc(hidden)]
+    pub fn device_id_for_test(&self) -> String {
+        self.device_id()
+    }
+
+    #[doc(hidden)]
+    pub fn set_adi_pb_for_test(&mut self, adi_pb: Vec<u8>) {
+        self.adi_pb = Some(adi_pb);
     }
 
     fn md_lu(&self) -> [u8; 32] {
@@ -178,6 +240,71 @@ impl AnisetteData {
     }
 }
 
+/// How often a request is attempted before giving up.
+const HTTP_ATTEMPTS: usize = 3;
+
+/// Delay between attempts.  The anisette servers are occasionally fronted by
+/// a proxy that answers 502 with an empty body, so a short retry is enough.
+const HTTP_RETRY_DELAY: Duration = Duration::from_secs(3);
+
+/// Decode a JSON body, turning an empty or malformed body into a readable
+/// error instead of a bare "error decoding response body".
+async fn decode_json<T: serde::de::DeserializeOwned>(
+    response: Response,
+    what: &str,
+) -> Result<T, AnisetteError> {
+    let status = response.status();
+    let text = response.text().await?;
+    if text.trim().is_empty() {
+        return Err(AnisetteError::InvalidArgument(format!(
+            "anisette server returned an empty body for {what} (HTTP {status}); \
+             please try again later"
+        )));
+    }
+    serde_json::from_str::<T>(&text).map_err(|err| {
+        AnisetteError::InvalidArgument(format!(
+            "anisette server returned an unexpected body for {what} (HTTP {status}); \
+             please try again later: {err}"
+        ))
+    })
+}
+
+/// Send a request, retrying on transport errors and 5xx responses.
+async fn send_with_retry(build: impl Fn() -> RequestBuilder) -> Result<Response, AnisetteError> {
+    let mut last_error: Option<AnisetteError> = None;
+    for attempt in 0..HTTP_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(HTTP_RETRY_DELAY).await;
+        }
+        match build().send().await {
+            Ok(response) if response.status().is_server_error() => {
+                debug!(
+                    "anisette server returned {} (attempt {}/{})",
+                    response.status(),
+                    attempt + 1,
+                    HTTP_ATTEMPTS
+                );
+                last_error = Some(AnisetteError::InvalidArgument(format!(
+                    "anisette server returned HTTP {}; please try again later",
+                    response.status()
+                )));
+            }
+            Ok(response) => return response.error_for_status().map_err(Into::into),
+            Err(err) => {
+                debug!(
+                    "anisette request failed: {err} (attempt {}/{})",
+                    attempt + 1,
+                    HTTP_ATTEMPTS
+                );
+                last_error = Some(AnisetteError::InvalidArgument(format!(
+                    "anisette request failed; please try again later: {err}"
+                )));
+            }
+        }
+    }
+    Err(last_error.unwrap_or(AnisetteError::Misc))
+}
+
 fn make_reqwest() -> Result<Client, AnisetteError> {
     Ok(ClientBuilder::new()
         .http1_title_case_headers()
@@ -189,14 +316,16 @@ impl AnisetteClient {
     pub async fn new(url: String) -> Result<AnisetteClient, AnisetteError> {
         let path = format!("{}/v3/client_info", url);
         let http_client = make_reqwest()?;
-        let mut client_info = http_client
-            .get(path)
-            .send()
-            .await?
-            .json::<AnisetteClientInfo>()
-            .await?;
-        client_info.client_info = CLIENT_INFO_HEADER.to_string();
+        let response = send_with_retry(|| http_client.get(&path)).await?;
+        let client_info = decode_json::<AnisetteClientInfo>(response, "/v3/client_info").await?;
         Ok(AnisetteClient { client_info, url })
+    }
+
+    /// Identity advertised by the anisette server.  Only used when provisioning
+    /// a fresh state; existing states keep the identity they were provisioned
+    /// with so that tokens stay valid.
+    pub fn server_identity(&self) -> (&str, &str) {
+        (&self.client_info.client_info, &self.client_info.user_agent)
     }
 
     fn build_apple_request(
@@ -204,12 +333,13 @@ impl AnisetteClient {
         state: &AnisetteState,
         builder: RequestBuilder,
         client_info: &str,
+        user_agent: &str,
     ) -> RequestBuilder {
         let dt: DateTime<Utc> = Utc::now().round_subsecs(0);
 
         builder
             .header("X-Mme-Client-Info", client_info)
-            .header("User-Agent", &self.client_info.user_agent)
+            .header("User-Agent", user_agent)
             .header("Content-Type", "text/x-xml-plist")
             .header("X-Apple-I-MD-LU", encode_hex(&state.md_lu()))
             .header("X-Mme-Device-Id", state.device_id())
@@ -253,19 +383,19 @@ impl AnisetteClient {
             },
         }
 
-        let headers = http_client
-            .post(path)
-            .json(&body)
-            .send()
-            .await?
-            .json::<AnisetteHeaders>()
-            .await?;
+        let response = send_with_retry(|| http_client.post(&path).json(&body)).await?;
+        let headers = decode_json::<AnisetteHeaders>(response, "/v3/get_headers").await?;
         match headers {
             AnisetteHeaders::GetHeadersError { message } => {
                 if message.contains("-45061") {
                     Err(AnisetteError::AnisetteNotProvisioned)
+                } else if message.contains("-80045") {
+                    // Apple rejects the identity this `adi_pb` was provisioned
+                    // with; the caller has to provision again with the current
+                    // server identity.
+                    Err(AnisetteError::AnisetteNotProvisioned)
                 } else {
-                    panic!("Unknown error {}", message)
+                    Err(AnisetteError::InvalidArgument(message))
                 }
             }
             AnisetteHeaders::Headers {
@@ -276,21 +406,33 @@ impl AnisetteClient {
                 machine_id,
                 one_time_password,
                 routing_info,
-                device_description: self.client_info.client_info.clone(),
+                device_description: state.identity().0.to_string(),
                 local_user_id: encode_hex(&state.md_lu()),
                 device_unique_identifier: state.device_id(),
             }),
         }
     }
 
-    pub async fn provision(&self, state: &mut AnisetteState) -> Result<(), AnisetteError> {
+    /// Provision a new `adi_pb` using `client_info`/`user_agent`.
+    ///
+    /// The identity is baked into the resulting `adi_pb`, so callers must pass
+    /// the identity the account's token was issued with.  Logging in uses the
+    /// server identity; refreshing reuses the stored one.
+    pub async fn provision(
+        &self,
+        state: &mut AnisetteState,
+        client_info: &str,
+        user_agent: &str,
+    ) -> Result<(), AnisetteError> {
         debug!("Provisioning Anisette");
+
         let http_client = make_reqwest()?;
         let resp = self
             .build_apple_request(
                 &state,
                 http_client.get("https://gsa.apple.com/grandslam/GsService2/lookup"),
                 LOOKUP_CLIENT_INFO,
+                AKD_USER_AGENT,
             )
             .send()
             .await?;
@@ -369,7 +511,8 @@ impl AnisetteClient {
                             .build_apple_request(
                                 state,
                                 http_client.post(start_provisioning_url),
-                                &self.client_info.client_info,
+                                client_info,
+                                user_agent,
                             )
                             .body(plist_to_string(&body_data)?)
                             .send()
@@ -411,7 +554,8 @@ impl AnisetteClient {
                             .build_apple_request(
                                 state,
                                 http_client.post(end_provisioning_url),
-                                &self.client_info.client_info,
+                                client_info,
+                                user_agent,
                             )
                             .body(plist_to_string(&body_data)?)
                             .send()
@@ -447,6 +591,7 @@ impl AnisetteClient {
                     ProvisionInput::ProvisioningSuccess { adi_pb } => {
                         debug!("ProvisioningSuccess");
                         state.adi_pb = Some(base64_decode(&adi_pb));
+                        state.set_identity(client_info.to_string(), user_agent.to_string());
                         connection.close(None).await?;
                         break;
                     }
@@ -466,6 +611,15 @@ pub struct RemoteAnisetteProviderV3 {
     pub state: Option<AnisetteState>,
     configuration_path: PathBuf,
     serial: String,
+    /// True when this provider is used for a login.  A login may adopt the
+    /// server identity only for states that cannot be used as-is; an account
+    /// that already has a working `adi_pb` keeps it.
+    login_mode: bool,
+    /// Data root holding legacy `state.plist` / `identifier` / `adi.pb`.
+    legacy_root: Option<PathBuf>,
+    /// Whether `configuration_path` is the account's own directory.  Legacy
+    /// shared files must never be overwritten.
+    account_scoped: bool,
 }
 
 impl RemoteAnisetteProviderV3 {
@@ -474,13 +628,79 @@ impl RemoteAnisetteProviderV3 {
         configuration_path: PathBuf,
         serial: String,
     ) -> RemoteAnisetteProviderV3 {
+        Self::with_mode(url, configuration_path, serial, false, None)
+    }
+
+    pub fn with_mode(
+        url: String,
+        configuration_path: PathBuf,
+        serial: String,
+        login_mode: bool,
+        legacy_root: Option<PathBuf>,
+    ) -> RemoteAnisetteProviderV3 {
+        let account_scoped = configuration_path_is_account_dir(&configuration_path);
         RemoteAnisetteProviderV3 {
             client_url: url,
             client: None,
             state: None,
             configuration_path,
             serial,
+            login_mode,
+            // Scoped only when the state path is the per-account directory;
+            // otherwise it is the legacy shared root and must stay read-only.
+            account_scoped,
+            legacy_root,
         }
+    }
+
+    /// Load state for this account.
+    ///
+    /// Order: the account's own `state.plist`; the legacy shared `state.plist`
+    /// (older versions kept a single global state); the legacy local layout
+    /// (`identifier` + `adi.pb`).  Legacy files are read only and never
+    /// rewritten, so downgrading keeps working.
+    fn load_state(&mut self) -> Result<(), AnisetteError> {
+        let own = self.configuration_path.join("state.plist");
+        if let Ok(state) = plist::from_file::<_, AnisetteState>(&own) {
+            self.state = Some(state);
+            return Ok(());
+        }
+
+        // A login starts a new device identity for this account.  Falling back
+        // to the legacy shared state here would make the account inherit the
+        // previous global identifier, which is not what "log in" means once
+        // state is per account.
+        if self.login_mode && self.account_scoped {
+            self.state = Some(AnisetteState::new());
+            return Ok(());
+        }
+
+        if let Some(root) = &self.legacy_root {
+            let legacy_global = root.join("state.plist");
+            if let Ok(state) = plist::from_file::<_, AnisetteState>(&legacy_global) {
+                self.state = Some(state);
+                return Ok(());
+            }
+
+            let legacy_identifier = root.join("identifier");
+            let legacy_adi = root.join("adi.pb");
+            if let (Ok(identifier), Ok(adi_pb)) = (
+                std::fs::read(&legacy_identifier),
+                std::fs::read(&legacy_adi),
+            ) {
+                if identifier.len() == 16 {
+                    let mut keychain_identifier = [0u8; 16];
+                    keychain_identifier.copy_from_slice(&identifier);
+                    let mut state = AnisetteState::with_identifier(keychain_identifier);
+                    state.adi_pb = Some(adi_pb);
+                    self.state = Some(state);
+                    return Ok(());
+                }
+            }
+        }
+
+        self.state = Some(AnisetteState::new());
+        Ok(())
     }
 }
 
@@ -493,39 +713,97 @@ impl AnisetteHeadersProvider for RemoteAnisetteProviderV3 {
         if self.client.is_none() {
             self.client = Some(AnisetteClient::new(self.client_url.clone()).await?);
         }
-        let client = self.client.as_ref().unwrap();
 
-        fs::create_dir_all(&self.configuration_path)?;
-
-        let config_path = self.configuration_path.join("state.plist");
         if self.state.is_none() {
-            self.state = Some(if let Ok(text) = plist::from_file(&config_path) {
-                text
-            } else {
-                AnisetteState::new()
-            });
+            self.load_state()?;
         }
 
-        let state = self.state.as_mut().unwrap();
-        if !state.is_provisioned() {
-            client.provision(state).await?;
-            plist::to_file_xml(&config_path, state)?;
-        }
-        let data = match client.get_headers(&state).await {
-            Ok(data) => data,
-            Err(err) => {
-                if matches!(err, AnisetteError::AnisetteNotProvisioned) {
-                    state.adi_pb = None;
-                    client.provision(state).await?;
-                    plist::to_file_xml(config_path, state)?;
-                    client.get_headers(&state).await?
-                } else {
-                    panic!()
-                }
-            }
+        let (server_client_info, server_user_agent) = {
+            let (ci, ua) = self.client.as_ref().unwrap().server_identity();
+            (ci.to_string(), ua.to_string())
         };
+
+        let state = self.state.as_ref().unwrap();
+        let has_adi = state.is_provisioned();
+        let has_identity = state.has_recorded_identity();
+
+        // An account that already has a working `adi_pb` keeps it, on login as
+        // well as on refresh.  Provisioning only happens when there is no adi
+        // yet, or when a legacy state (provisioned before identities were
+        // recorded) is used for a login and therefore has to adopt the server
+        // identity.  Nothing here ever discards an existing adi: resetting is
+        // an explicit user action (`reset-anisette`).
+        let needs_provision = !has_adi || (self.login_mode && !has_identity);
+
+        let identity = if has_identity {
+            let (ci, ua) = state.identity();
+            (ci.to_string(), ua.to_string())
+        } else if needs_provision {
+            (server_client_info, server_user_agent)
+        } else {
+            // Legacy state used for refresh: keep the identity its token was
+            // issued with instead of silently switching to the server's.
+            let (ci, ua) = state.identity();
+            (ci.to_string(), ua.to_string())
+        };
+
+        if needs_provision {
+            let client = self.client.as_ref().unwrap();
+            let state = self.state.as_mut().unwrap();
+            client.provision(state, &identity.0, &identity.1).await?;
+            self.persist_state()?;
+        }
+
+        // Never auto-recover by re-provisioning: a rejected adi means the user
+        // has to run `reset-anisette` explicitly.
+        let data = self.get_headers_from_state().await?;
         Ok(data.get_headers(self.serial.clone()))
     }
+}
+
+impl RemoteAnisetteProviderV3 {
+    async fn get_headers_from_state(&self) -> Result<AnisetteData, AnisetteError> {
+        let client = self.client.as_ref().unwrap();
+        let state = self.state.as_ref().unwrap();
+        client.get_headers(state).await
+    }
+
+    fn persist_state(&self) -> Result<(), AnisetteError> {
+        if !self.account_scoped {
+            // Legacy shared location: read only, so older versions and
+            // accounts that have not logged in again keep working.
+            return Ok(());
+        }
+        fs::create_dir_all(&self.configuration_path)?;
+        if let Some(state) = &self.state {
+            plist::to_file_xml(self.configuration_path.join("state.plist"), state)?;
+        }
+        Ok(())
+    }
+}
+
+/// Write a brand-new state to `path`: fresh random `keychain_identifier` and
+/// no `adi_pb`.
+///
+/// This is "reset anisette data" in the destructive sense: the next use
+/// provisions as a different device.  Writing the file (rather than deleting
+/// it) also stops the loader from falling back to the legacy shared state,
+/// which would otherwise resurrect the old identity.
+pub fn reset_state_file(path: &PathBuf) -> Result<(), AnisetteError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let state = AnisetteState::new();
+    plist::to_file_xml(path, &state)?;
+    Ok(())
+}
+
+/// True when the path looks like `<root>/anisette/<account>`.
+fn configuration_path_is_account_dir(path: &PathBuf) -> bool {
+    path.parent()
+        .and_then(|p| p.file_name())
+        .map(|name| name == crate::ANISETTE_ACCOUNT_DIR)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -534,6 +812,24 @@ mod tests {
     use crate::remote_anisette_v3::RemoteAnisetteProviderV3;
     use crate::{AnisetteError, DEFAULT_ANISETTE_URL_V3};
     use log::info;
+
+    #[test]
+    fn legacy_state_without_identity_uses_pixel7() {
+        let state = super::AnisetteState::new();
+        assert!(!state.has_recorded_identity());
+        assert_eq!(state.identity().0, super::LEGACY_CLIENT_INFO);
+        assert_eq!(state.identity().1, super::LEGACY_USER_AGENT);
+        assert!(state.identity().0.contains("<Pixel 7>"));
+    }
+
+    #[test]
+    fn recorded_identity_is_kept() {
+        let mut state = super::AnisetteState::new();
+        state.set_identity("<PC> <Windows;6.2(0,0);9200> <x>".into(), "ua".into());
+        assert!(state.has_recorded_identity());
+        assert_eq!(state.identity().0, "<PC> <Windows;6.2(0,0);9200> <x>");
+        assert_eq!(state.identity().1, "ua");
+    }
 
     #[tokio::test]
     async fn fetch_anisette_remote_v3() -> Result<(), AnisetteError> {
