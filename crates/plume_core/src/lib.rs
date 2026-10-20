@@ -4,7 +4,8 @@ mod utils;
 
 pub use apple_codesign::{AppleCodesignError, SettingsScope, SigningSettings, UnifiedSigner};
 
-pub use omnisette::AnisetteConfiguration;
+pub use omnisette::{AnisetteConfiguration, account_dir_name};
+pub use omnisette::remote_anisette_v3::reset_state_file;
 
 pub use utils::{CertificateIdentity, CertificateReset, MobileProvision};
 #[cfg(feature = "tweaks")]

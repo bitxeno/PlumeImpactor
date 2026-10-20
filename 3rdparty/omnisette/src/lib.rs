@@ -63,7 +63,11 @@ pub enum AnisetteError {
 
 pub const DEFAULT_ANISETTE_URL: &str = "https://ani.f1sh.me/";
 
-pub const DEFAULT_ANISETTE_URL_V3: &str = "https://ani.sidestore.io";
+pub const DEFAULT_ANISETTE_URL_V3: &str = "https://new.ani.sidestore.io";
+
+/// Directory (relative to `configuration_path`) holding per-account anisette
+/// state, one subdirectory per Apple ID `adsid`.
+pub const ANISETTE_ACCOUNT_DIR: &str = "anisette";
 
 #[derive(Clone, Debug)]
 pub struct AnisetteConfiguration {
@@ -71,6 +75,10 @@ pub struct AnisetteConfiguration {
     anisette_url_v3: String,
     configuration_path: PathBuf,
     macos_serial: String,
+    /// When set, state lives in `<configuration_path>/anisette/<account>/`.
+    account_id: Option<String>,
+    /// This provider is being created for a login flow.
+    login_mode: bool,
 }
 
 impl Default for AnisetteConfiguration {
@@ -85,7 +93,9 @@ impl AnisetteConfiguration {
             anisette_url: DEFAULT_ANISETTE_URL.to_string(),
             anisette_url_v3: DEFAULT_ANISETTE_URL_V3.to_string(),
             configuration_path: PathBuf::new(),
-            macos_serial: "0".to_string()
+            macos_serial: "0".to_string(),
+            account_id: None,
+            login_mode: false,
         }
     }
 
@@ -93,12 +103,41 @@ impl AnisetteConfiguration {
         &self.anisette_url
     }
 
+    pub fn anisette_url_v3(&self) -> &String {
+        &self.anisette_url_v3
+    }
+
     pub fn configuration_path(&self) -> &PathBuf {
         &self.configuration_path
     }
 
+    pub fn account_id(&self) -> Option<&str> {
+        self.account_id.as_deref()
+    }
+
+    pub fn login_mode(&self) -> bool {
+        self.login_mode
+    }
+
+    /// Directory holding this account's `state.plist`, or the legacy shared
+    /// location when no account is selected.
+    pub fn state_dir(&self) -> PathBuf {
+        match &self.account_id {
+            Some(account) => self
+                .configuration_path
+                .join(ANISETTE_ACCOUNT_DIR)
+                .join(account_dir_name(account)),
+            None => self.configuration_path.clone(),
+        }
+    }
+
     pub fn set_anisette_url(mut self, anisette_url: String) -> AnisetteConfiguration {
         self.anisette_url = anisette_url;
+        self
+    }
+
+    pub fn set_anisette_url_v3(mut self, anisette_url_v3: String) -> AnisetteConfiguration {
+        self.anisette_url_v3 = anisette_url_v3;
         self
     }
 
@@ -109,6 +148,20 @@ impl AnisetteConfiguration {
 
     pub fn set_configuration_path(mut self, configuration_path: PathBuf) -> AnisetteConfiguration {
         self.configuration_path = configuration_path;
+        self
+    }
+
+    pub fn set_account_id(mut self, account: String) -> AnisetteConfiguration {
+        self.account_id = Some(account);
+        self
+    }
+
+    /// Marks this configuration as belonging to a login flow.
+    ///
+    /// It does not discard existing anisette data: an account that already has
+    /// a working `adi_pb` keeps using it.
+    pub fn set_login_mode(mut self, login: bool) -> AnisetteConfiguration {
+        self.login_mode = login;
         self
     }
 }
@@ -140,6 +193,15 @@ impl AnisetteHeadersProviderRes {
 }
 
 impl AnisetteHeaders {
+    /// Provider for a login: always provisions a fresh `adi_pb` with the
+    /// identity advertised by the anisette server, so the newly issued
+    /// `xcode_gs_token` matches that identity.
+    pub fn get_login_anisette_headers_provider(
+        configuration: AnisetteConfiguration,
+    ) -> Result<AnisetteHeadersProviderRes, AnisetteError> {
+        Self::get_anisette_headers_provider(configuration.set_login_mode(true))
+    }
+
     pub fn get_anisette_headers_provider(
         configuration: AnisetteConfiguration,
     ) -> Result<AnisetteHeadersProviderRes, AnisetteError> {
@@ -148,16 +210,22 @@ impl AnisetteHeaders {
             return Ok(AnisetteHeadersProviderRes::local(Box::new(prov)));
         }
 
-        // TODO: handle Err because it will just go to remote anisette and not tell the user anything
-        if let Ok(ssc_anisette_headers_provider) =
-            AnisetteHeaders::get_ssc_anisette_headers_provider(configuration.clone())
-        {
-            return Ok(ssc_anisette_headers_provider);
-        }
-
+        // Remote anisette is the only supported provider: the local SSC path
+        // provisions with a different identity and would invalidate tokens
+        // issued through the remote flow.
         #[cfg(feature = "remote-anisette-v3")]
         return Ok(AnisetteHeadersProviderRes::remote(Box::new(
-            remote_anisette_v3::RemoteAnisetteProviderV3::new(configuration.anisette_url_v3, configuration.configuration_path.clone(), configuration.macos_serial.clone()),
+            remote_anisette_v3::RemoteAnisetteProviderV3::with_mode(
+                configuration.anisette_url_v3.clone(),
+                configuration.state_dir(),
+                configuration.macos_serial.clone(),
+                configuration.login_mode(),
+                // Legacy shared files live in the data root, two levels above
+                // `<root>/anisette/<email>/`.
+                configuration
+                    .account_id()
+                    .map(|_| configuration.configuration_path().clone()),
+            ),
         )));
 
         #[cfg(feature = "remote-anisette")]
@@ -223,4 +291,22 @@ mod tests {
         );
         Ok(())
     }
+}
+
+/// Map an account identifier (an Apple ID email) to a filesystem-safe
+/// directory name without exposing it.
+///
+/// Uses SHA-256 over the normalised (trimmed, lowercased) email so the same
+/// Apple ID always maps to the same directory on case-insensitive
+/// filesystems, while the directory name reveals nothing about the user.
+pub fn account_dir_name(account: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let normalised = account.trim().to_lowercase();
+    let digest = Sha256::digest(normalised.as_bytes());
+    let mut out = String::with_capacity(32);
+    for byte in &digest[..16] {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
