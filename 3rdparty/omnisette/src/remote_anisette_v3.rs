@@ -240,6 +240,29 @@ impl AnisetteData {
     }
 }
 
+/// Wire format of a stored `adi_pb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdiFormat {
+    /// `ADIB` bundle, produced by newer servers (adid_anisette).
+    Adib,
+    /// Pre-ADIB ADI blob (`00 00 00 01 ...`), produced by older servers.
+    Legacy,
+    /// Anything else; treated as legacy so it is sent to the legacy server.
+    Unknown,
+}
+
+impl AdiFormat {
+    pub fn of(adi_pb: &[u8]) -> AdiFormat {
+        if adi_pb.starts_with(b"ADIB") {
+            AdiFormat::Adib
+        } else if adi_pb.starts_with(&[0, 0, 0, 1]) {
+            AdiFormat::Legacy
+        } else {
+            AdiFormat::Unknown
+        }
+    }
+}
+
 /// How often a request is attempted before giving up.
 const HTTP_ATTEMPTS: usize = 3;
 
@@ -620,6 +643,8 @@ pub struct RemoteAnisetteProviderV3 {
     /// Whether `configuration_path` is the account's own directory.  Legacy
     /// shared files must never be overwritten.
     account_scoped: bool,
+    /// Server able to consume a pre-ADIB `adi_pb`.
+    legacy_server_url: Option<String>,
 }
 
 impl RemoteAnisetteProviderV3 {
@@ -628,7 +653,7 @@ impl RemoteAnisetteProviderV3 {
         configuration_path: PathBuf,
         serial: String,
     ) -> RemoteAnisetteProviderV3 {
-        Self::with_mode(url, configuration_path, serial, false, None)
+        Self::with_mode(url, configuration_path, serial, false, None, None)
     }
 
     pub fn with_mode(
@@ -637,6 +662,7 @@ impl RemoteAnisetteProviderV3 {
         serial: String,
         login_mode: bool,
         legacy_root: Option<PathBuf>,
+        legacy_server_url: Option<String>,
     ) -> RemoteAnisetteProviderV3 {
         let account_scoped = configuration_path_is_account_dir(&configuration_path);
         RemoteAnisetteProviderV3 {
@@ -650,6 +676,7 @@ impl RemoteAnisetteProviderV3 {
             // otherwise it is the legacy shared root and must stay read-only.
             account_scoped,
             legacy_root,
+            legacy_server_url,
         }
     }
 
@@ -710,12 +737,16 @@ impl AnisetteHeadersProvider for RemoteAnisetteProviderV3 {
         &mut self,
         _skip_provisioning: bool,
     ) -> Result<HashMap<String, String>, AnisetteError> {
-        if self.client.is_none() {
-            self.client = Some(AnisetteClient::new(self.client_url.clone()).await?);
-        }
-
         if self.state.is_none() {
             self.load_state()?;
+        }
+
+        // A stored pre-ADIB `adi_pb` can only be consumed by the legacy
+        // server, so pick the endpoint based on the data we actually have.
+        // New states and fresh provisioning use the configured server.
+        if self.client.is_none() {
+            let url = self.effective_server_url();
+            self.client = Some(AnisetteClient::new(url).await?);
         }
 
         let (server_client_info, server_user_agent) = {
@@ -762,6 +793,22 @@ impl AnisetteHeadersProvider for RemoteAnisetteProviderV3 {
 }
 
 impl RemoteAnisetteProviderV3 {
+    /// Server to talk to for the state currently loaded.
+    fn effective_server_url(&self) -> String {
+        let legacy_adi = self
+            .state
+            .as_ref()
+            .and_then(|s| s.adi_pb.as_deref())
+            .map(|adi| AdiFormat::of(adi) != AdiFormat::Adib)
+            .unwrap_or(false);
+        if legacy_adi {
+            if let Some(url) = &self.legacy_server_url {
+                return url.clone();
+            }
+        }
+        self.client_url.clone()
+    }
+
     async fn get_headers_from_state(&self) -> Result<AnisetteData, AnisetteError> {
         let client = self.client.as_ref().unwrap();
         let state = self.state.as_ref().unwrap();

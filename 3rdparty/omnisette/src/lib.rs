@@ -65,6 +65,10 @@ pub const DEFAULT_ANISETTE_URL: &str = "https://ani.f1sh.me/";
 
 pub const DEFAULT_ANISETTE_URL_V3: &str = "https://new.ani.sidestore.io";
 
+/// Server that still speaks the pre-ADIB `adi_pb` format.  Anisette data
+/// provisioned by older versions can only be used against this server.
+pub const LEGACY_ANISETTE_URL_V3: &str = "https://ani.sidestore.io";
+
 /// Directory (relative to `configuration_path`) holding per-account anisette
 /// state, one subdirectory per Apple ID `adsid`.
 pub const ANISETTE_ACCOUNT_DIR: &str = "anisette";
@@ -79,6 +83,8 @@ pub struct AnisetteConfiguration {
     account_id: Option<String>,
     /// This provider is being created for a login flow.
     login_mode: bool,
+    /// Server to use for states holding a pre-ADIB `adi_pb`.
+    legacy_server_url_v3: Option<String>,
 }
 
 impl Default for AnisetteConfiguration {
@@ -96,6 +102,7 @@ impl AnisetteConfiguration {
             macos_serial: "0".to_string(),
             account_id: None,
             login_mode: false,
+            legacy_server_url_v3: Some(LEGACY_ANISETTE_URL_V3.to_string()),
         }
     }
 
@@ -117,6 +124,15 @@ impl AnisetteConfiguration {
 
     pub fn login_mode(&self) -> bool {
         self.login_mode
+    }
+
+    pub fn legacy_server_url_v3(&self) -> Option<&String> {
+        self.legacy_server_url_v3.as_ref()
+    }
+
+    pub fn set_legacy_server_url_v3(mut self, url: String) -> AnisetteConfiguration {
+        self.legacy_server_url_v3 = Some(url);
+        self
     }
 
     /// Directory holding this account's `state.plist`, or the legacy shared
@@ -192,6 +208,21 @@ impl AnisetteHeadersProviderRes {
     }
 }
 
+/// Whether the configuration's data directory holds anisette data written by
+/// the local SSC provider (`identifier` / `adi.pb`).
+fn has_local_anisette_data(configuration: &AnisetteConfiguration) -> bool {
+    let root = configuration.configuration_path();
+    if configuration.account_id().is_some() {
+        // Per-account state takes precedence; SSC only owns the shared files.
+        if configuration.state_dir().join("state.plist").exists() {
+            return false;
+        }
+    }
+    // `identifier` alone is not evidence of local use: older remote versions
+    // also created it.  The provisioning blob only exists for SSC accounts.
+    root.join("adi.pb").exists()
+}
+
 impl AnisetteHeaders {
     /// Provider for a login: always provisions a fresh `adi_pb` with the
     /// identity advertised by the anisette server, so the newly issued
@@ -210,9 +241,18 @@ impl AnisetteHeaders {
             return Ok(AnisetteHeadersProviderRes::local(Box::new(prov)));
         }
 
-        // Remote anisette is the only supported provider: the local SSC path
-        // provisions with a different identity and would invalidate tokens
-        // issued through the remote flow.
+        // Local SSC is kept for accounts provisioned with it: their adi lives
+        // in the SSC provisioning directory and cannot be consumed by a
+        // remote server.  Only use it when that data exists and the account
+        // has no per-account remote state yet.
+        if !configuration.login_mode() && has_local_anisette_data(&configuration) {
+            if let Ok(ssc) =
+                AnisetteHeaders::get_ssc_anisette_headers_provider(configuration.clone())
+            {
+                return Ok(ssc);
+            }
+        }
+
         #[cfg(feature = "remote-anisette-v3")]
         return Ok(AnisetteHeadersProviderRes::remote(Box::new(
             remote_anisette_v3::RemoteAnisetteProviderV3::with_mode(
@@ -225,6 +265,7 @@ impl AnisetteHeaders {
                 configuration
                     .account_id()
                     .map(|_| configuration.configuration_path().clone()),
+                configuration.legacy_server_url_v3().cloned(),
             ),
         )));
 
