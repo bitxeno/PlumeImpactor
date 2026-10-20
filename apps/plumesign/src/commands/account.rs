@@ -6,7 +6,6 @@ use clap::{Args, Subcommand};
 use dialoguer::Select;
 
 use plume_core::{
-    AnisetteConfiguration,
     auth::Account,
     developer::{DeveloperSession, qh::devices::DeviceType},
 };
@@ -190,7 +189,7 @@ pub async fn get_authenticated_account(username: Option<String>) -> Result<Devel
             .clone()
     };
 
-    let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
+    let anisette_config = crate::commands::anisette::build(gsa_account.email(), false);
 
     log::info!(
         "Restoring session for {}...",
@@ -253,7 +252,6 @@ async fn login(args: LoginArgs) -> Result<()> {
         std::result::Result::Ok(TwoFactorAction::SubmitCode(input.to_string()))
     };
 
-    let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
     let username = if let Some(user) = args.username {
         user
     } else {
@@ -262,6 +260,10 @@ async fn login(args: LoginArgs) -> Result<()> {
         std::io::stdin().read_line(&mut input)?;
         input.trim().to_string()
     };
+
+    // The email is the account key in `accounts.json` and is known before
+    // login, so the state can go straight into its final directory.
+    let anisette_config = crate::commands::anisette::build(&username, true);
 
     let password = if let Some(pass) = args.password {
         pass
@@ -279,12 +281,12 @@ async fn login(args: LoginArgs) -> Result<()> {
     };
 
     println!("Logging in...");
-    let account = Account::login(login_closure, tfa_closure, anisette_config).await?;
+    let logged_in = Account::login(login_closure, tfa_closure, anisette_config).await?;
 
     let settings_path = get_settings_path();
     let mut settings = AccountStore::load(&Some(settings_path.clone())).await?;
     settings
-        .accounts_add_from_session(username, account)
+        .accounts_add_from_session(username, logged_in)
         .await?;
 
     log::info!("Successfully logged in and account saved.");
@@ -312,6 +314,9 @@ async fn logout(args: LogoutArgs) -> Result<()> {
             .clone()
     };
 
+    // Anisette state is intentionally kept: logging out is not a request to
+    // discard the device identity or the provisioned adi, so logging back in
+    // reuses both.  Only `reset-anisette` discards them.
     settings.accounts_remove(&email).await?;
 
     log::info!("Successfully logged out and removed account.");

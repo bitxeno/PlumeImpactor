@@ -92,11 +92,7 @@ impl SettingsScreen {
             Message::ToggleAutoStart(_) => Task::none(),
             Message::SelectTeam(_, _) => Task::none(),
             Message::SelectLocale(_) => Task::none(),
-            Message::ResetAnisetteData => {
-                let path = crate::defaults::get_data_path().join("state.plist");
-                let _ = std::fs::remove_file(path);
-                Task::none()
-            }
+            Message::ResetAnisetteData => Task::none(),
             _ => Task::none(),
         }
     }

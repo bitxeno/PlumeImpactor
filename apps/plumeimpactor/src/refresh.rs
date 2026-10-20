@@ -175,7 +175,9 @@ impl RefreshDaemon {
             account.email().clone(),
             account.adsid().clone(),
             account.xcode_gs_token().clone(),
-            AnisetteConfiguration::default().set_configuration_path(get_data_path()),
+            AnisetteConfiguration::default()
+                .set_configuration_path(get_data_path())
+                .set_account_id(account.email().clone()),
         )
         .await
         .map_err(|e| format!("Failed to create session: {}", e))?;

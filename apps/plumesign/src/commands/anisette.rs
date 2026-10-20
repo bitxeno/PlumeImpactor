@@ -1,13 +1,17 @@
-use std::io;
-use std::path::{Path, PathBuf};
+//! Anisette server selection and per-account state management.
+//!
+//! The remote anisette server is a user-level setting stored next to
+//! `accounts.json` (see [`plume_store::anisette_paths::server`]), so it
+//! survives independent of any single account.
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::get_data_path;
+use plume_utils::mask_email;
 
 #[derive(Debug, Args)]
-#[command(arg_required_else_help = true, about = "Manage local anisette data")]
+#[command(arg_required_else_help = true, about = "Anisette server and state")]
 pub struct AnisetteArgs {
     #[command(subcommand)]
     pub command: AnisetteCommands,
@@ -15,88 +19,102 @@ pub struct AnisetteArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AnisetteCommands {
-    /// Delete local anisette data so it is generated again on next use
-    Reset,
+    /// Show or change the remote anisette server
+    Server(ServerArgs),
+    /// Reset an account's anisette data (new device identity, requires re-login)
+    Reset(ResetArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ServerArgs {
+    /// Set the remote anisette server URL
+    #[arg(long = "set", value_name = "URL")]
+    pub set: Option<String>,
+
+    /// Restore the default server
+    #[arg(long = "reset", conflicts_with = "set")]
+    pub reset: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ResetArgs {
+    /// Email of the account to reset (required)
+    #[arg(short = 'u', long = "username", value_name = "EMAIL", required = true)]
+    pub username: String,
+}
+
+/// Build the anisette configuration used by every command.
+///
+/// `login` marks the flow as a login, which lets a legacy state adopt the
+/// server identity once.  Existing per-account state is always reused.
+pub fn build(email: &str, login: bool) -> plume_core::AnisetteConfiguration {
+    plume_core::AnisetteConfiguration::default()
+        .set_configuration_path(get_data_path())
+        .set_account_id(email.to_string())
+        .set_anisette_url_v3(plume_store::anisette_paths::server::url(&get_data_path()))
+        .set_login_mode(login)
 }
 
 pub async fn execute(args: AnisetteArgs) -> Result<()> {
     match args.command {
-        AnisetteCommands::Reset => reset(),
+        AnisetteCommands::Server(server_args) => server(server_args).await,
+        AnisetteCommands::Reset(reset_args) => reset(reset_args).await,
     }
 }
 
-fn reset() -> Result<()> {
-    let data_path = get_data_path();
-    let removed = reset_data(&data_path)?;
+async fn server(args: ServerArgs) -> Result<()> {
+    let data_root = get_data_path();
 
-    if removed.is_empty() {
-        log::info!("No anisette data found in {}.", data_path.display());
-    } else {
-        for path in &removed {
-            log::info!("Removed {}.", path.display());
-        }
+    if args.reset {
+        plume_store::anisette_paths::server::set_url(&data_root, None)?;
+        log::info!(
+            "Anisette server reset to default: {}",
+            plume_store::anisette_paths::server::DEFAULT_URL
+        );
+        return Ok(());
     }
 
-    log::info!("Anisette data will be regenerated on next use. You may need to log in again.");
+    if let Some(url) = args.set {
+        plume_store::anisette_paths::server::set_url(&data_root, Some(&url))?;
+        log::info!(
+            "Anisette server set to: {}",
+            plume_store::anisette_paths::server::url(&data_root)
+        );
+        log::info!(
+            "Existing anisette data was provisioned against the previous server. \
+             If requests start failing, reset the account with \
+             `plumesign anisette reset -u <EMAIL>`."
+        );
+        return Ok(());
+    }
+
+    let (url, source) = plume_store::anisette_paths::server::url_with_source(&data_root);
+    log::info!("Anisette server: {url} (source: {source})");
     Ok(())
 }
 
-fn reset_data(data_path: &Path) -> Result<Vec<PathBuf>> {
-    let mut removed = Vec::new();
+async fn reset(args: ResetArgs) -> Result<()> {
+    let settings_path = crate::commands::account::get_settings_path();
+    let settings = plume_store::AccountStore::load(&Some(settings_path)).await?;
 
-    for name in ["state.plist", "identifier", "adi.pb"] {
-        let path = data_path.join(name);
-        match std::fs::remove_file(&path) {
-            Ok(()) => removed.push(path),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        }
-    }
+    let email = settings
+        .get_account(&args.username)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Account '{}' not found. Use 'plumesign account list' to see available accounts.",
+                args.username
+            )
+        })?
+        .email()
+        .clone();
 
-    let anisette_dir = data_path.join("anisette");
-    match std::fs::remove_dir_all(&anisette_dir) {
-        Ok(()) => removed.push(anisette_dir),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err.into()),
-    }
+    plume_store::anisette_paths::reset_account_state(&get_data_path(), &email)?;
 
-    Ok(removed)
-}
+    log::info!(
+        "Anisette data reset for {}. A new device identity will be generated on next use; \
+         you need to log in again.",
+        mask_email(&email)
+    );
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reset_removes_anisette_data_and_keeps_configuration() {
-        let data_path =
-            std::env::temp_dir().join(format!("plumesign-anisette-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(data_path.join("anisette").join("account")).unwrap();
-
-        for path in [
-            data_path.join("state.plist"),
-            data_path.join("identifier"),
-            data_path.join("adi.pb"),
-            data_path
-                .join("anisette")
-                .join("account")
-                .join("state.plist"),
-            data_path.join("accounts.json"),
-            data_path.join("anisette.json"),
-        ] {
-            std::fs::write(path, b"test").unwrap();
-        }
-
-        let removed = reset_data(&data_path).unwrap();
-
-        assert_eq!(removed.len(), 4);
-        assert!(!data_path.join("state.plist").exists());
-        assert!(!data_path.join("identifier").exists());
-        assert!(!data_path.join("adi.pb").exists());
-        assert!(!data_path.join("anisette").exists());
-        assert!(data_path.join("accounts.json").exists());
-        assert!(data_path.join("anisette.json").exists());
-
-        std::fs::remove_dir_all(data_path).unwrap();
-    }
+    Ok(())
 }

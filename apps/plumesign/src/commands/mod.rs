@@ -39,7 +39,7 @@ pub enum Commands {
     MachO(macho::MachArgs),
     /// Manage Apple Developer account authentication
     Account(account::AccountArgs),
-    /// Manage local anisette data
+    /// Anisette server and local state
     Anisette(anisette::AnisetteArgs),
     /// Certificate management (list / revoke)
     Certificate(certificate::CertificateArgs),
