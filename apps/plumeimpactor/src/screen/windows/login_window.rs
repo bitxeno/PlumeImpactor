@@ -345,8 +345,11 @@ impl LoginWindow {
                         .build()
                         .unwrap();
 
+                    // The email is known before login and is the account key,
+                    // so state goes straight into its final directory.
                     let anisette_config = AnisetteConfiguration::default()
-                        .set_configuration_path(crate::defaults::get_data_path());
+                        .set_configuration_path(crate::defaults::get_data_path())
+                        .set_account_id(email_clone.clone());
 
                     let account_result = rt.block_on(Account::login(
                         || Ok((email_clone.clone(), password.clone())),

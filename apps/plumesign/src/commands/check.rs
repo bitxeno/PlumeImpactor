@@ -12,8 +12,6 @@ use crate::get_data_path;
 use idevice::afc::AfcClient;
 use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
 use idevice::{IdeviceService, RsdService};
-use plume_core::AnisetteConfiguration;
-use plume_core::auth::anisette_data::AnisetteData;
 
 use crate::commands::device::select_device;
 use plume_utils::Device;
@@ -262,10 +260,31 @@ async fn config() -> Result<()> {
     let config_path = get_data_path();
     log::info!("configurationPath={}", config_path.display());
 
-    // anisette data auto save to ~/.config/PlumeImpactor/adb.pb or ~/.config/PlumeImpactor/state.plist
-    let anisette_config = AnisetteConfiguration::default().set_configuration_path(get_data_path());
-    let anisette = AnisetteData::new(anisette_config).await?;
-    log::info!("anisette={:#?}", anisette);
+    // Anisette data is per account: anisette/<sha256(email)[:32]>/state.plist.
+    // Show what exists instead of provisioning an unowned state.
+    let anisette_root = config_path.join(plume_store::anisette_paths::ANISETTE_DIR);
+    log::info!("anisettePath={}", anisette_root.display());
+    if anisette_root.is_dir() {
+        let mut entries: Vec<_> = std::fs::read_dir(&anisette_root)?
+            .filter_map(|e| e.ok())
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let state = entry.path().join("state.plist");
+            log::info!(
+                "  {} (state.plist: {})",
+                entry.file_name().to_string_lossy(),
+                if state.is_file() { "present" } else { "missing" }
+            );
+        }
+    }
+
+    let legacy = config_path.join("state.plist");
+    log::info!(
+        "legacyState={} ({})",
+        legacy.display(),
+        if legacy.is_file() { "present" } else { "missing" }
+    );
 
     Ok(())
 }

@@ -305,7 +305,8 @@ pub(crate) async fn run_installation(
                 account.adsid().clone(),
                 account.xcode_gs_token().clone(),
                 AnisetteConfiguration::default()
-                    .set_configuration_path(crate::defaults::get_data_path()),
+                    .set_configuration_path(crate::defaults::get_data_path())
+                    .set_account_id(account.email().clone()),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -570,7 +571,9 @@ pub(crate) async fn export_certificate(account: plume_store::GsaAccount) -> Resu
     let session = DeveloperSession::new(
         account.adsid().clone(),
         account.xcode_gs_token().clone(),
-        AnisetteConfiguration::default().set_configuration_path(crate::defaults::get_data_path()),
+        AnisetteConfiguration::default()
+            .set_configuration_path(crate::defaults::get_data_path())
+            .set_account_id(account.email().clone()),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -646,7 +649,9 @@ pub(crate) async fn fetch_teams(
     let session = DeveloperSession::new(
         account.adsid().clone(),
         account.xcode_gs_token().clone(),
-        AnisetteConfiguration::default().set_configuration_path(crate::defaults::get_data_path()),
+        AnisetteConfiguration::default()
+            .set_configuration_path(crate::defaults::get_data_path())
+            .set_account_id(account.email().clone()),
     )
     .await
     .map_err(|e| e.to_string())?;

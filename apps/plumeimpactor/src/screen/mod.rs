@@ -511,6 +511,21 @@ impl Impactor {
                             }
                             Task::none()
                         }
+                        settings::Message::ResetAnisetteData => {
+                            if let Some(store) = &self.account_store {
+                                if let Some(account) = store.selected_account() {
+                                    // Destructive reset: new device identity and
+                                    // no adi, so the next login provisions fresh.
+                                    if let Err(e) = plume_store::anisette_paths::reset_account_state(
+                                        &crate::defaults::get_data_path(),
+                                        account.email(),
+                                    ) {
+                                        log::error!("Failed to reset anisette data: {e}");
+                                    }
+                                }
+                            }
+                            Task::none()
+                        }
                         settings::Message::RemoveAccount(index) => {
                             if let Some(store) = &mut self.account_store {
                                 let mut emails: Vec<_> = store.accounts().keys().cloned().collect();

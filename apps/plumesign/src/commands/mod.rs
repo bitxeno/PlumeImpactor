@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod account;
+pub mod anisette;
 pub mod app;
 pub mod certificate;
 pub mod check;
@@ -38,6 +39,8 @@ pub enum Commands {
     MachO(macho::MachArgs),
     /// Manage Apple Developer account authentication
     Account(account::AccountArgs),
+    /// Anisette server and state
+    Anisette(anisette::AnisetteArgs),
     /// Certificate management (list / revoke)
     Certificate(certificate::CertificateArgs),
     /// Device management commands

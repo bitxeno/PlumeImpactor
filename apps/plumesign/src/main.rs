@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::SignRsd(args) => commands::sign_rsd::execute(args).await?,
         Commands::MachO(args) => commands::macho::execute(args).await?,
         Commands::Account(args) => commands::account::execute(args).await?,
+        Commands::Anisette(args) => commands::anisette::execute(args).await?,
         Commands::Device(args) => commands::device::execute(args).await?,
         Commands::DeviceId(args) => commands::device_id::execute(args).await?,
         Commands::DeviceInfo(args) => commands::device_info::execute(args).await?,
