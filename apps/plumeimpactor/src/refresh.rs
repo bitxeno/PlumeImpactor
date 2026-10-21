@@ -172,6 +172,7 @@ impl RefreshDaemon {
             .ok_or_else(|| format!("Account {} not found", refresh_device.account))?;
 
         let session = DeveloperSession::new(
+            account.email().clone(),
             account.adsid().clone(),
             account.xcode_gs_token().clone(),
             AnisetteConfiguration::default().set_configuration_path(get_data_path()),

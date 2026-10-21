@@ -198,6 +198,7 @@ pub async fn get_authenticated_account(username: Option<String>) -> Result<Devel
     );
 
     let session = DeveloperSession::new(
+        gsa_account.email().clone(),
         gsa_account.adsid().clone(),
         gsa_account.xcode_gs_token().clone(),
         anisette_config,

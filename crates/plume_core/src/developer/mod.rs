@@ -1,3 +1,4 @@
+mod client_identity;
 pub mod qh;
 mod session;
 pub mod v1;

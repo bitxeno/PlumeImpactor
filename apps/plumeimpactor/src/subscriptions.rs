@@ -302,6 +302,7 @@ pub(crate) async fn run_installation(
             send("Ensuring account is valid...".to_string(), 20);
 
             let session = DeveloperSession::new(
+                account.email().clone(),
                 account.adsid().clone(),
                 account.xcode_gs_token().clone(),
                 AnisetteConfiguration::default()
@@ -568,6 +569,7 @@ pub(crate) async fn export_certificate(account: plume_store::GsaAccount) -> Resu
     use plume_core::{AnisetteConfiguration, CertificateIdentity, developer::DeveloperSession};
 
     let session = DeveloperSession::new(
+        account.email().clone(),
         account.adsid().clone(),
         account.xcode_gs_token().clone(),
         AnisetteConfiguration::default().set_configuration_path(crate::defaults::get_data_path()),
@@ -644,6 +646,7 @@ pub(crate) async fn fetch_teams(
     use plume_core::{AnisetteConfiguration, developer::DeveloperSession};
 
     let session = DeveloperSession::new(
+        account.email().clone(),
         account.adsid().clone(),
         account.xcode_gs_token().clone(),
         AnisetteConfiguration::default().set_configuration_path(crate::defaults::get_data_path()),

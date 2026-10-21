@@ -1,8 +1,8 @@
+use crate::AnisetteError;
 use crate::adi_proxy::ProvisioningError::InvalidResponse;
 use crate::anisette_headers_provider::AnisetteHeadersProvider;
-use crate::AnisetteError;
-use base64::engine::general_purpose::STANDARD as base64_engine;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as base64_engine;
 use log::debug;
 use plist::{Dictionary, Value};
 use rand::RngCore;
@@ -122,10 +122,16 @@ pub trait ConfigurableADIProxy: ADIProxy {
 }
 
 pub const AKD_USER_AGENT: &str = "akd/1.0 CFNetwork/808.1.4";
-pub const LOOKUP_CLIENT_INFO: &str =
+pub const MACOS_CLIENT_INFO_HEADER: &str =
     "<MacBookPro13,2> <macOS;13.1;22C65> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+pub const LOOKUP_CLIENT_INFO: &str = MACOS_CLIENT_INFO_HEADER;
 pub const CLIENT_INFO_HEADER: &str =
     "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.iTunes/12.12.4.1)>";
+// Apple binds the developer session token to the identity it was issued with.
+// These are the identities used by older releases, kept so saved accounts keep
+// working without logging in again.
+pub const LEGACY_CLIENT_INFO_HEADER: &str =
+    "<Pixel 7> <Android;14;UQ1A.240205.002> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
 pub const DS_ID: i64 = -2;
 pub const IDENTIFIER_LENGTH: usize = 16;
 pub type Identifier = [u8; IDENTIFIER_LENGTH];

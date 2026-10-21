@@ -17,11 +17,28 @@ use omnisette::{AnisetteConfiguration, AnisetteHeaders};
 
 use crate::Error;
 
+const AUTHKIT_CLIENT_INFO: &str = "com.apple.AuthKit/1 (com.apple.akd/1.0)";
+
+pub(crate) fn normalize_client_info(client_info: &str) -> String {
+    match client_info.split('<').nth(3) {
+        Some(segment) => {
+            let component = segment.split('>').next().unwrap_or(segment);
+            if component.is_empty() {
+                client_info.to_string()
+            } else {
+                client_info.replace(component, AUTHKIT_CLIENT_INFO)
+            }
+        }
+        None => client_info.to_string(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AnisetteData {
     pub base_headers: HashMap<String, String>,
     pub generated_at: SystemTime,
     pub config: AnisetteConfiguration,
+    client_info_override: Option<String>,
 }
 
 impl AnisetteData {
@@ -33,7 +50,23 @@ impl AnisetteData {
             base_headers,
             generated_at: SystemTime::now(),
             config,
+            client_info_override: None,
         })
+    }
+
+    pub fn set_client_info_override(&mut self, client_info: Option<String>) {
+        self.client_info_override = client_info;
+    }
+
+    pub(crate) fn effective_client_info(&self) -> Option<String> {
+        self.client_info_override
+            .as_deref()
+            .or_else(|| {
+                self.base_headers
+                    .get("X-Mme-Client-Info")
+                    .map(String::as_str)
+            })
+            .map(normalize_client_info)
     }
 
     pub fn needs_refresh(&self) -> bool {
@@ -47,7 +80,9 @@ impl AnisetteData {
     }
 
     pub async fn refresh(&self) -> Result<Self, crate::Error> {
-        Self::new(self.config.clone()).await
+        let mut refreshed = Self::new(self.config.clone()).await?;
+        refreshed.client_info_override = self.client_info_override.clone();
+        Ok(refreshed)
     }
 
     pub fn generate_headers(
@@ -64,20 +99,17 @@ impl AnisetteData {
         let old_client_info = headers.remove("X-Mme-Client-Info");
 
         if client_info {
-            let client_info = match old_client_info {
-                Some(v) => {
-                    let temp = v.as_str();
-
-                    temp.replace(
-                        temp.split('<').nth(3).unwrap().split('>').nth(0).unwrap(),
-                        "com.apple.AuthKit/1 (com.apple.akd/1.0)",
-                    )
-                }
+            let client_info = match self
+                .client_info_override
+                .as_deref()
+                .or(old_client_info.as_deref())
+            {
+                Some(v) => normalize_client_info(v),
                 None => {
                     return headers;
                 }
             };
-            headers.insert("X-Mme-Client-Info".to_owned(), client_info.to_owned());
+            headers.insert("X-Mme-Client-Info".to_owned(), client_info);
         }
 
         if app_info {
@@ -120,5 +152,47 @@ impl AnisetteData {
             Some(v) => Ok(v.to_string()),
             None => Err(Error::DeveloperSessionRequestFailed),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omnisette::adi_proxy::{CLIENT_INFO_HEADER, LEGACY_CLIENT_INFO_HEADER};
+
+    fn data_with_client_info(client_info: &str) -> AnisetteData {
+        AnisetteData {
+            base_headers: HashMap::from([(
+                "X-Mme-Client-Info".to_string(),
+                client_info.to_string(),
+            )]),
+            generated_at: SystemTime::now(),
+            config: AnisetteConfiguration::new(),
+            client_info_override: None,
+        }
+    }
+
+    #[test]
+    fn provider_identity_is_rewritten_for_apple_requests() {
+        let data = data_with_client_info(CLIENT_INFO_HEADER);
+        let headers = data.generate_headers(false, true, false);
+
+        assert_eq!(
+            headers.get("X-Mme-Client-Info").unwrap(),
+            "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+        );
+    }
+
+    #[test]
+    fn override_takes_precedence_over_provider_identity() {
+        let mut data = data_with_client_info(CLIENT_INFO_HEADER);
+        data.set_client_info_override(Some(LEGACY_CLIENT_INFO_HEADER.to_string()));
+
+        let headers = data.generate_headers(false, true, false);
+
+        assert_eq!(
+            headers.get("X-Mme-Client-Info").unwrap(),
+            "<Pixel 7> <Android;14;UQ1A.240205.002> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+        );
     }
 }

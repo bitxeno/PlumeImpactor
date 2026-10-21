@@ -155,7 +155,8 @@ impl AccountStore {
         account: plume_core::auth::Account,
     ) -> Result<(), Error> {
         let first_name = account.get_name().0;
-        let s = plume_core::developer::DeveloperSession::using_account(account).await?;
+        let s =
+            plume_core::developer::DeveloperSession::using_account(email.clone(), account).await?;
         let teams_response = s.qh_list_teams().await?;
         let adsid = s.adsid().clone();
         let xcode_gs_token = s.xcode_gs_token().clone();
