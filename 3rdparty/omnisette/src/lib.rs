@@ -63,7 +63,7 @@ pub enum AnisetteError {
 
 pub const DEFAULT_ANISETTE_URL: &str = "https://ani.f1sh.me/";
 
-pub const DEFAULT_ANISETTE_URL_V3: &str = "https://new.ani.sidestore.io";
+pub const DEFAULT_ANISETTE_URL_V3: &str = "https://mac-ani.jkcoxson.com";
 
 /// Server that still speaks the pre-ADIB `adi_pb` format.  Anisette data
 /// provisioned by older versions can only be used against this server.

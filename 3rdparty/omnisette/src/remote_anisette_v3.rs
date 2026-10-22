@@ -335,9 +335,44 @@ fn make_reqwest() -> Result<Client, AnisetteError> {
         .build()?)
 }
 
+/// Normalize a user-supplied anisette server URL.
+///
+/// Trailing slashes are dropped so appending `/v3/...` cannot produce `//`,
+/// and non-HTTP values are rejected here rather than failing mid-login.
+fn normalize_base_url(raw: &str) -> Result<String, AnisetteError> {
+    let url = raw.trim().trim_end_matches('/');
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(AnisetteError::InvalidArgument(format!(
+            "anisette server URL must start with http:// or https://: {raw}"
+        )));
+    }
+    if url.len() <= "https://".len() {
+        return Err(AnisetteError::InvalidArgument(format!(
+            "anisette server URL is missing a host: {raw}"
+        )));
+    }
+    Ok(url.to_string())
+}
+
+/// Map an HTTP base URL to the WebSocket scheme used by the provisioning
+/// socket.  A self-hosted server on plain HTTP has to become `ws://`, not
+/// stay `http://`, or the handshake fails with an unsupported scheme.
+fn websocket_base_url(base: &str) -> String {
+    if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base.to_string()
+    }
+}
+
 impl AnisetteClient {
     pub async fn new(url: String) -> Result<AnisetteClient, AnisetteError> {
-        let path = format!("{}/v3/client_info", url);
+        // The URL is user configurable, so tolerate a trailing slash and
+        // report a malformed value before the request is attempted.
+        let url = normalize_base_url(&url)?;
+        let path = format!("{url}/v3/client_info");
         let http_client = make_reqwest()?;
         let response = send_with_retry(|| http_client.get(&path)).await?;
         let client_info = decode_json::<AnisetteClientInfo>(response, "/v3/client_info").await?;
@@ -485,8 +520,10 @@ impl AnisetteClient {
             start_provisioning_url, end_provisioning_url
         );
 
-        let provision_ws_url =
-            format!("{}/v3/provisioning_session", self.url).replace("https://", "wss://");
+        let provision_ws_url = format!(
+            "{}/v3/provisioning_session",
+            websocket_base_url(&self.url)
+        );
         let (mut connection, _) = connect_async(&provision_ws_url).await?;
 
         #[derive(Deserialize)]
@@ -859,6 +896,32 @@ mod tests {
     use crate::remote_anisette_v3::RemoteAnisetteProviderV3;
     use crate::{AnisetteError, DEFAULT_ANISETTE_URL_V3};
     use log::info;
+
+    #[test]
+    fn server_url_is_normalized() {
+        assert_eq!(
+            super::normalize_base_url(" https://mac-ani.jkcoxson.com/ ").unwrap(),
+            "https://mac-ani.jkcoxson.com"
+        );
+        assert_eq!(
+            super::normalize_base_url("http://192.168.1.10:6969").unwrap(),
+            "http://192.168.1.10:6969"
+        );
+        assert!(super::normalize_base_url("mac-ani.jkcoxson.com").is_err());
+        assert!(super::normalize_base_url("https://").is_err());
+    }
+
+    #[test]
+    fn websocket_scheme_follows_http_scheme() {
+        assert_eq!(
+            super::websocket_base_url("https://mac-ani.jkcoxson.com"),
+            "wss://mac-ani.jkcoxson.com"
+        );
+        assert_eq!(
+            super::websocket_base_url("http://192.168.1.10:6969"),
+            "ws://192.168.1.10:6969"
+        );
+    }
 
     #[test]
     fn legacy_state_without_identity_uses_pixel7() {

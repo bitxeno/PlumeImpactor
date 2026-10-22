@@ -74,7 +74,10 @@ pub mod server {
     use serde::{Deserialize, Serialize};
 
     /// Server used when the user has not chosen one.
-    pub const DEFAULT_URL: &str = "https://new.ani.sidestore.io";
+    pub const DEFAULT_URL: &str = plume_core::DEFAULT_ANISETTE_URL_V3;
+
+    /// Overrides the stored setting for a single run, mainly for debugging.
+    pub const ENV_OVERRIDE: &str = "PLUME_ANISETTE_URL";
 
     const SETTINGS_FILE: &str = "anisette.json";
 
@@ -89,6 +92,67 @@ pub mod server {
         data_root.join(SETTINGS_FILE)
     }
 
+    /// Trim whitespace and trailing slashes so that callers can safely append
+    /// `/v3/...` without producing a double slash.
+    ///
+    /// Returns `None` for anything that is not an absolute `http(s)` URL: a
+    /// relative or scheme-less value would only fail much later, at login.
+    pub fn normalize_url(raw: &str) -> Option<String> {
+        let url = raw.trim().trim_end_matches('/');
+        if url.is_empty() {
+            return None;
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return None;
+        }
+        if url.len() <= "https://".len() {
+            return None;
+        }
+        Some(url.to_string())
+    }
+
+    /// Where the effective URL came from, for diagnostics.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Source {
+        Env,
+        Custom,
+        Default,
+    }
+
+    impl std::fmt::Display for Source {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let text = match self {
+                Source::Env => ENV_OVERRIDE,
+                Source::Custom => SETTINGS_FILE,
+                Source::Default => "default",
+            };
+            f.write_str(text)
+        }
+    }
+
+    /// Remote anisette server in effect, falling back to the default.
+    ///
+    /// Precedence: [`ENV_OVERRIDE`], then the stored setting, then the default.
+    pub fn url(data_root: &Path) -> String {
+        url_with_source(data_root).0
+    }
+
+    /// Same as [`url`], also reporting where the value came from.
+    pub fn url_with_source(data_root: &Path) -> (String, Source) {
+        if let Some(from_env) = std::env::var(ENV_OVERRIDE)
+            .ok()
+            .and_then(|value| normalize_url(&value))
+        {
+            return (from_env, Source::Env);
+        }
+
+        if let Some(stored) = load(data_root).url.as_deref().and_then(normalize_url) {
+            return (stored, Source::Custom);
+        }
+
+        (DEFAULT_URL.to_string(), Source::Default)
+    }
+
     fn load(data_root: &Path) -> Settings {
         std::fs::read_to_string(settings_path(data_root))
             .ok()
@@ -96,29 +160,120 @@ pub mod server {
             .unwrap_or_default()
     }
 
-    /// Remote anisette server in effect, falling back to the default.
-    pub fn url(data_root: &Path) -> String {
-        load(data_root)
-            .url
-            .filter(|url| !url.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_URL.to_string())
-    }
-
-    /// Whether the value comes from the settings file rather than the default.
-    pub fn is_custom(data_root: &Path) -> bool {
-        load(data_root).url.is_some()
-    }
-
     /// Set a custom server; `None` restores the default.
-    pub fn set_url(data_root: &Path, url: Option<&str>) -> std::io::Result<()> {
-        let settings = Settings {
-            url: url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()),
+    ///
+    /// The URL is normalized and validated up front so a typo fails here
+    /// instead of surfacing as a confusing login error later.
+    pub fn set_url(data_root: &Path, url: Option<&str>) -> Result<(), SetUrlError> {
+        let url = match url {
+            Some(raw) => Some(normalize_url(raw).ok_or(SetUrlError::InvalidUrl(raw.trim().to_string()))?),
+            None => None,
         };
+
+        let settings = Settings { url };
         let path = settings_path(data_root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(path, serde_json::to_string_pretty(&settings)?)?;
         Ok(())
+    }
+
+    #[derive(Debug)]
+    pub enum SetUrlError {
+        /// The value is not an absolute `http(s)` URL.
+        InvalidUrl(String),
+        Io(std::io::Error),
+        Json(serde_json::Error),
+    }
+
+    impl std::fmt::Display for SetUrlError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SetUrlError::InvalidUrl(url) => write!(
+                    f,
+                    "'{url}' is not a valid server URL; expected an absolute http:// or https:// URL"
+                ),
+                SetUrlError::Io(err) => write!(f, "{err}"),
+                SetUrlError::Json(err) => write!(f, "{err}"),
+            }
+        }
+    }
+
+    impl std::error::Error for SetUrlError {}
+
+    impl From<std::io::Error> for SetUrlError {
+        fn from(err: std::io::Error) -> Self {
+            SetUrlError::Io(err)
+        }
+    }
+
+    impl From<serde_json::Error> for SetUrlError {
+        fn from(err: serde_json::Error) -> Self {
+            SetUrlError::Json(err)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn temp_root() -> PathBuf {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "plume-anisette-server-{}-{unique}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn default_is_used_without_a_stored_value() {
+            let root = temp_root();
+            let (url, source) = url_with_source(&root);
+            assert_eq!(url, DEFAULT_URL);
+            assert_eq!(source, Source::Default);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn stored_value_wins_over_default() {
+            let root = temp_root();
+            set_url(&root, Some("https://example.test/")).unwrap();
+
+            let (url, source) = url_with_source(&root);
+            assert_eq!(url, "https://example.test");
+            assert_eq!(source, Source::Custom);
+
+            std::fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn reset_restores_the_default() {
+            let root = temp_root();
+            set_url(&root, Some("https://example.test")).unwrap();
+            set_url(&root, None).unwrap();
+
+            assert_eq!(url_with_source(&root), (DEFAULT_URL.to_string(), Source::Default));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn invalid_urls_are_rejected() {
+            let root = temp_root();
+            assert!(matches!(
+                set_url(&root, Some("example.test")),
+                Err(SetUrlError::InvalidUrl(_))
+            ));
+            assert!(matches!(
+                set_url(&root, Some("ftp://example.test")),
+                Err(SetUrlError::InvalidUrl(_))
+            ));
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 }

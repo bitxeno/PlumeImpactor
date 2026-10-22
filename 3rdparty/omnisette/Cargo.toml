@@ -39,5 +39,5 @@ objc = "0.2"
 objc-foundation = "0.1"
 
 [dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 simplelog = "0.12"

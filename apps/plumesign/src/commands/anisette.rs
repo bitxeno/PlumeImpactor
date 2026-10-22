@@ -71,10 +71,7 @@ async fn server(args: ServerArgs) -> Result<()> {
             "Anisette server reset to default: {}",
             plume_store::anisette_paths::server::DEFAULT_URL
         );
-        return Ok(());
-    }
-
-    if let Some(url) = args.set {
+    } else if let Some(url) = args.set {
         plume_store::anisette_paths::server::set_url(&data_root, Some(&url))?;
         log::info!(
             "Anisette server set to: {}",
@@ -85,11 +82,22 @@ async fn server(args: ServerArgs) -> Result<()> {
              If requests start failing, reset the account with \
              `plumesign anisette reset -u <EMAIL>`."
         );
-        return Ok(());
     }
 
-    let (url, source) = plume_store::anisette_paths::server::url_with_source(&data_root);
-    log::info!("Anisette server: {url} (source: {source})");
+    // Always report the effective endpoint and where it came from, so a
+    // mismatch (for example an env override masking the stored value) is
+    // visible instead of silently changing which server is contacted.
+    let (effective, effective_source) =
+        plume_store::anisette_paths::server::url_with_source(&data_root);
+    log::info!("Anisette server: {effective} (source: {effective_source})");
+
+    if matches!(effective_source, plume_store::anisette_paths::server::Source::Env) {
+        log::info!(
+            "{} is set, so it takes precedence over the stored setting.",
+            plume_store::anisette_paths::server::ENV_OVERRIDE
+        );
+    }
+
     Ok(())
 }
 
