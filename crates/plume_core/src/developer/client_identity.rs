@@ -6,7 +6,13 @@ use omnisette::AnisetteConfiguration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-pub(crate) const CANDIDATES_VERSION: u32 = 1;
+/// Bumped when the probed candidate list changes, so entries recorded against
+/// an older list are dropped and the account is probed again.
+///
+/// v2: the provider default became macOS and the probe order is now
+/// macOS > Windows > Pixel 7, so a `checked` entry from v1 no longer proves
+/// that the current list was exhausted.
+pub(crate) const CANDIDATES_VERSION: u32 = 2;
 
 const STORE_VERSION: u32 = 1;
 const FILE_NAME: &str = "client_identity.json";

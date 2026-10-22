@@ -83,16 +83,17 @@ struct AnisetteClientInfo {
     user_agent: String,
 }
 
-/// The client identity used by the stock (pre-server-identity) anisette flow.
+/// The identity used when a state does not record one of its own.
 ///
 /// Apple binds the developer session token (`xcode_gs_token`) to the
-/// `X-Mme-Client-Info` that was used when the token was issued.  Every state
-/// written before this field existed was provisioned with this identity, so
-/// it has to be kept as the fallback; otherwise old accounts start failing
-/// with `1100 Your session has expired` as soon as the header changes.
-pub const LEGACY_CLIENT_INFO: &str =
-    "<Pixel 7> <Android;14;UQ1A.240205.002> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
-pub const LEGACY_USER_AGENT: &str = "akd/1.0 CFNetwork/808.1.4";
+/// `X-Mme-Client-Info` that was used when the token was issued.  States
+/// written before the identity was recorded have no value stored, so they
+/// fall back to this one.  macOS is the default because it is the identity
+/// the anisette servers advertise and the one most accounts were created
+/// with; Windows and Pixel 7 are probed after it by the session layer.
+pub const DEFAULT_CLIENT_INFO: &str =
+    "<MacBookPro13,2> <macOS;13.1;22C65> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
+pub const DEFAULT_USER_AGENT: &str = "akd/1.0 CFNetwork/808.1.4";
 
 #[derive(Serialize, Deserialize)]
 pub struct AnisetteState {
@@ -108,7 +109,7 @@ pub struct AnisetteState {
     )]
     adi_pb: Option<Vec<u8>>,
     /// Identity this `adi_pb` was provisioned with.  `None` for states written
-    /// by older versions, which are treated as [`LEGACY_CLIENT_INFO`].
+    /// by older versions, which are treated as [`DEFAULT_CLIENT_INFO`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     client_info: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,12 +143,12 @@ impl AnisetteState {
         self.adi_pb.is_some()
     }
 
-    /// Identity to use for Apple requests, falling back to the legacy one for
-    /// states that predate identity tracking.
+    /// Identity to use for Apple requests, falling back to the default one
+    /// (macOS) for states that predate identity tracking.
     fn identity(&self) -> (&str, &str) {
         (
-            self.client_info.as_deref().unwrap_or(LEGACY_CLIENT_INFO),
-            self.user_agent.as_deref().unwrap_or(LEGACY_USER_AGENT),
+            self.client_info.as_deref().unwrap_or(DEFAULT_CLIENT_INFO),
+            self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT),
         )
     }
 
@@ -924,12 +925,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_state_without_identity_uses_pixel7() {
+    fn state_without_identity_uses_macos_default() {
         let state = super::AnisetteState::new();
         assert!(!state.has_recorded_identity());
-        assert_eq!(state.identity().0, super::LEGACY_CLIENT_INFO);
-        assert_eq!(state.identity().1, super::LEGACY_USER_AGENT);
-        assert!(state.identity().0.contains("<Pixel 7>"));
+        assert_eq!(state.identity().0, super::DEFAULT_CLIENT_INFO);
+        assert_eq!(state.identity().1, super::DEFAULT_USER_AGENT);
+        assert!(state.identity().0.contains("<MacBookPro13,2>"));
+        assert!(state.identity().0.contains("<macOS;"));
     }
 
     #[test]
