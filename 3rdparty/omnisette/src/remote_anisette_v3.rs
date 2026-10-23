@@ -8,7 +8,7 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use chrono::{DateTime, SubsecRound, Utc};
 use futures_util::{stream::StreamExt, SinkExt};
-use log::debug;
+use log::{debug, warn};
 use plist::{Data, Dictionary};
 use rand::Rng;
 use reqwest::{Client, ClientBuilder, RequestBuilder, Response};
@@ -271,6 +271,10 @@ const HTTP_ATTEMPTS: usize = 3;
 /// a proxy that answers 502 with an empty body, so a short retry is enough.
 const HTTP_RETRY_DELAY: Duration = Duration::from_secs(3);
 
+/// Per-connection timeout.  Without it an unreachable anisette server waits
+/// for the OS TCP timeout (~75s on macOS) on every attempt.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Decode a JSON body, turning an empty or malformed body into a readable
 /// error instead of a bare "error decoding response body".
 async fn decode_json<T: serde::de::DeserializeOwned>(
@@ -298,6 +302,12 @@ async fn send_with_retry(build: impl Fn() -> RequestBuilder) -> Result<Response,
     let mut last_error: Option<AnisetteError> = None;
     for attempt in 0..HTTP_ATTEMPTS {
         if attempt > 0 {
+            warn!(
+                "retrying anisette request (attempt {}/{}) in {}s",
+                attempt + 1,
+                HTTP_ATTEMPTS,
+                HTTP_RETRY_DELAY.as_secs()
+            );
             tokio::time::sleep(HTTP_RETRY_DELAY).await;
         }
         match build().send().await {
@@ -332,6 +342,7 @@ async fn send_with_retry(build: impl Fn() -> RequestBuilder) -> Result<Response,
 fn make_reqwest() -> Result<Client, AnisetteError> {
     Ok(ClientBuilder::new()
         .http1_title_case_headers()
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .danger_accept_invalid_certs(true) // TODO: pin the apple certificate
         .build()?)
 }
@@ -525,7 +536,17 @@ impl AnisetteClient {
             "{}/v3/provisioning_session",
             websocket_base_url(&self.url)
         );
-        let (mut connection, _) = connect_async(&provision_ws_url).await?;
+        let (mut connection, _) = tokio::time::timeout(
+            HTTP_CONNECT_TIMEOUT,
+            connect_async(&provision_ws_url),
+        )
+        .await
+        .map_err(|_| {
+            AnisetteError::InvalidArgument(format!(
+                "anisette server connection timed out after {}s: {provision_ws_url}",
+                HTTP_CONNECT_TIMEOUT.as_secs()
+            ))
+        })??;
 
         #[derive(Deserialize)]
         #[serde(tag = "result")]
