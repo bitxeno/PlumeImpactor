@@ -5,8 +5,8 @@ use std::sync::Arc;
 use tokio::fs;
 
 use plume_core::{
+    developer::{qh::devices::DeviceType, DeveloperSession},
     CertificateIdentity, MobileProvision, SettingsScope, SigningSettings, UnifiedSigner,
-    developer::{DeveloperSession, qh::devices::DeviceType},
 };
 
 use crate::{Bundle, BundleType, Error, PlistInfoTrait, SignerApp, SignerMode, SignerOptions};
@@ -535,6 +535,7 @@ impl Signer {
 
     fn fix_bundle_name(&self, bundle: &Bundle, identifier: &Option<String>) -> Result<(), Error> {
         let bundle_name = bundle.get_bundle_name();
+        let display_name = bundle.get_display_name();
         let mut new_bundle_name = bundle_name.clone();
         if new_bundle_name.is_none() {
             if let Some(id) = identifier.clone() {
@@ -547,7 +548,12 @@ impl Signer {
             if re.is_match(name) {
                 *name = re.replace_all(name, "").to_string();
             }
-            bundle.set_name(name)?;
+            if display_name.is_none() {
+                if let Some(display_name) = bundle_name {
+                    bundle.set_display_name(&display_name)?;
+                }
+            }
+            bundle.set_bundle_name(name)?;
         }
 
         Ok(())
@@ -556,5 +562,95 @@ impl Signer {
     fn fix_bundle_identifier(&self, identifier: &str) -> String {
         let re = Regex::new(r"[^a-zA-Z0-9.-]").unwrap();
         re.replace_all(identifier, "").to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plist::{Dictionary, Value};
+    use std::{fs, path::PathBuf};
+
+    struct BundleCleanup(PathBuf);
+
+    impl Drop for BundleCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn make_bundle(info: Dictionary) -> (Bundle, PathBuf) {
+        let bundle_dir =
+            std::env::temp_dir().join(format!("plume_bundle_name_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&bundle_dir).expect("create temporary bundle");
+        let info_path = bundle_dir.join("Info.plist");
+        Value::Dictionary(info)
+            .to_file_xml(&info_path)
+            .expect("write Info.plist");
+        let bundle = Bundle::new(&bundle_dir).expect("load bundle");
+        (bundle, bundle_dir)
+    }
+
+    fn plist_string(bundle: &Bundle, key: &str) -> Option<String> {
+        Value::from_file(bundle.bundle_dir().join("Info.plist"))
+            .expect("read Info.plist")
+            .as_dictionary()?
+            .get(key)?
+            .as_string()
+            .map(|value| value.to_string())
+    }
+
+    #[test]
+    fn fix_bundle_name_preserves_display_name_and_sanitizes_bundle_name() {
+        let mut info = Dictionary::new();
+        info.insert(
+            "CFBundleName".into(),
+            Value::String("Random Episode".into()),
+        );
+        info.insert(
+            "CFBundleDisplayName".into(),
+            Value::String("Random Episode".into()),
+        );
+        let (bundle, bundle_dir) = make_bundle(info);
+        let _cleanup = BundleCleanup(bundle_dir);
+        let signer = Signer::new(None, SignerOptions::default());
+
+        signer
+            .fix_bundle_name(&bundle, &Some("com.example.random".into()))
+            .expect("fix bundle name");
+
+        assert_eq!(
+            plist_string(&bundle, "CFBundleDisplayName").as_deref(),
+            Some("Random Episode")
+        );
+        assert_eq!(
+            plist_string(&bundle, "CFBundleName").as_deref(),
+            Some("RandomEpisode")
+        );
+    }
+
+    #[test]
+    fn fix_bundle_name_sets_display_name_before_sanitizing_fallback() {
+        let mut info = Dictionary::new();
+        info.insert(
+            "CFBundleName".into(),
+            Value::String("Random Episode".into()),
+        );
+        let (bundle, bundle_dir) = make_bundle(info);
+        let _cleanup = BundleCleanup(bundle_dir);
+        let signer = Signer::new(None, SignerOptions::default());
+
+        signer
+            .fix_bundle_name(&bundle, &Some("com.example.random".into()))
+            .expect("fix bundle name");
+
+        assert_eq!(
+            plist_string(&bundle, "CFBundleDisplayName").as_deref(),
+            Some("Random Episode")
+        );
+        assert_eq!(
+            plist_string(&bundle, "CFBundleName").as_deref(),
+            Some("RandomEpisode")
+        );
     }
 }
