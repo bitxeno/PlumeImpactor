@@ -472,13 +472,15 @@ async fn list_accounts() -> Result<()> {
     let accounts = settings.accounts();
 
     if accounts.is_empty() {
-        log::info!("No accounts found. Use 'account login' to add an account.");
+        println!("No accounts found. Use 'account login' to add an account.");
         return Ok(());
     }
 
     let selected_email = settings.selected_account().map(|a| a.email().clone());
 
-    log::info!("Saved accounts:");
+    // Normal functional output: show real emails so accounts are usable.
+    // Only logs are sanitized (see main.rs logger).
+    println!("Saved accounts:");
     for (email, account) in accounts {
         let selected = if Some(email) == selected_email.as_ref() {
             "(selected)"
@@ -486,7 +488,7 @@ async fn list_accounts() -> Result<()> {
             ""
         };
 
-        log::info!(" [{}] {} {}", account.first_name(), email, selected);
+        println!(" [{}] {} {}", account.first_name(), email, selected);
     }
 
     Ok(())
@@ -505,7 +507,8 @@ async fn switch_account(args: SwitchArgs) -> Result<()> {
 
     settings.account_select(&args.email).await?;
 
-    log::info!("Switched to account: {}", args.email);
+    // Normal functional output, not a log (see list_accounts).
+    println!("Switched to account: {}", args.email);
 
     Ok(())
 }
