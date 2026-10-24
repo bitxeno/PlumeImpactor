@@ -153,8 +153,18 @@ jobs:
       - name: Prepare uploads
         run: |
           mkdir -p upload
-          shopt -s globstar
-          mv prepare/**/* upload/
+          shopt -s globstar nullglob
+          for f in prepare/**/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            if [[ "$base" == *.exe ]]; then
+              cp "$f" upload/
+            else
+              # tar.gz keeps the executable bit that a raw asset loses on download
+              chmod +x "$f"
+              tar -czf "upload/${base}.tar.gz" -C "$(dirname "$f")" "$base"
+            fi
+          done
           ls -l upload/
 
       - name: Create GitHub Release and upload assets
