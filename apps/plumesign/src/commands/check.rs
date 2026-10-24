@@ -88,6 +88,10 @@ pub struct PairingArgs {
         value_name = "PAIRING_FILE"
     )]
     pub pairing_file: Option<String>,
+
+    /// The IP was specified manually rather than probed
+    #[arg(long = "manual")]
+    pub manual: bool,
 }
 
 #[derive(Debug, Args)]
@@ -191,11 +195,17 @@ async fn pairing(args: PairingArgs) -> Result<()> {
     };
 
     let path = Path::new(&pairing_file);
-    validate_pairing_file(path, &ip, args.port, &host).await?;
+    validate_pairing_file(path, &ip, args.port, &host, args.manual).await?;
     Ok(())
 }
 
-async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &str) -> Result<()> {
+async fn validate_pairing_file(
+    pairing_file: &Path,
+    ip: &str,
+    port: u16,
+    host: &str,
+    manual: bool,
+) -> Result<()> {
     let mut rpf = RpPairingFile::read_from_file(pairing_file)
         .await
         .map_err(|e| anyhow::anyhow!("invalid pairing file '{}': {}", pairing_file.display(), e))?;
@@ -231,12 +241,19 @@ async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &
         .and_then(|dict| dict.get("ProductType"))
         .and_then(|v| v.as_string())
         .expect("Failed to get ProductType from lockdown value");
+    // Both fields are optional: `remotepairing_ip` records the IP used for this
+    // check, and `manual` records whether that IP was specified by the user
+    // (`--manual`) instead of being probed.
+    let remotepairing_ip = Some(ip);
+    let manual_flag = Some(manual);
     let peer_info_json = json!({
         "account_id": peer_identifier,
         "alt_irk": rpf.alt_irk,
         "model": model,
         "name": name,
         "remotepairing_udid": udid,
+        "remotepairing_ip": remotepairing_ip,
+        "manual": manual_flag,
     });
 
     let pairing_file_dir = get_data_path().join("pairing_files");
@@ -244,14 +261,25 @@ async fn validate_pairing_file(pairing_file: &Path, ip: &str, port: u16, host: &
 
     // save pairing file
     let output = pairing_file_dir.join(format!("{}.plist", udid));
-    rpf.write_to_file(output).await?;
+    rpf.write_to_file(&output).await.map_err(|e| {
+        anyhow::anyhow!("failed to write pairing file '{}': {}", output.display(), e)
+    })?;
 
     // save peer device info for reference
     let peer_info_output = pairing_file_dir.join(format!("{}.json", udid));
     fs::write(
-        peer_info_output,
+        &peer_info_output,
         serde_json::to_string_pretty(&peer_info_json)?,
-    )?;
+    )
+    .map_err(|e| {
+        anyhow::anyhow!(
+            "failed to write peer info '{}': {}",
+            peer_info_output.display(),
+            e
+        )
+    })?;
+
+    println!("SUCCESS: pairing verified saved to '{}'", output.display());
 
     Ok(())
 }
@@ -274,7 +302,11 @@ async fn config() -> Result<()> {
             log::info!(
                 "  {} (state.plist: {})",
                 entry.file_name().to_string_lossy(),
-                if state.is_file() { "present" } else { "missing" }
+                if state.is_file() {
+                    "present"
+                } else {
+                    "missing"
+                }
             );
         }
     }
@@ -283,7 +315,11 @@ async fn config() -> Result<()> {
     log::info!(
         "legacyState={} ({})",
         legacy.display(),
-        if legacy.is_file() { "present" } else { "missing" }
+        if legacy.is_file() {
+            "present"
+        } else {
+            "missing"
+        }
     );
 
     Ok(())

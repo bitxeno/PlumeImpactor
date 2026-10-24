@@ -23,6 +23,10 @@ pub struct PairArgs {
     /// Optional host identifier sent to the device during pairing
     #[arg(short = 'H', long = "host", value_name = "HOST")]
     pub host: Option<String>,
+
+    /// The IP was specified manually rather than probed
+    #[arg(long = "manual")]
+    pub manual: bool,
 }
 
 pub async fn execute(args: PairArgs) -> Result<()> {
@@ -71,12 +75,19 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         let peer_device: &idevice::remote_pairing::PeerDevice =
             rpc.paired_peer_device().expect("Failed to get peer device");
         let udid = peer_device.remotepairing_udid.clone();
+        // Both fields are optional: `remotepairing_ip` records the IP used for
+        // pairing, and `manual` records whether that IP was specified by the
+        // user (`--manual`) instead of being probed.
+        let remotepairing_ip = Some(args.ip.clone());
+        let manual_flag = Some(args.manual);
         let peer_info_json = json!({
             "account_id": peer_device.account_id,
             "alt_irk": peer_device.alt_irk,
             "model": peer_device.model,
             "name": peer_device.name,
             "remotepairing_udid": udid,
+            "remotepairing_ip": remotepairing_ip,
+            "manual": manual_flag,
         });
 
         (udid, peer_info_json)
@@ -87,14 +98,30 @@ pub async fn execute(args: PairArgs) -> Result<()> {
 
     // save pairing file
     let output_path = pairing_file_dir.join(format!("{}.plist", udid));
-    pairing_file.write_to_file(output_path.clone()).await?;
+    pairing_file
+        .write_to_file(&output_path)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to write pairing file '{}': {}",
+                output_path.display(),
+                e
+            )
+        })?;
 
     // save peer device info for reference
     let peer_info_output = pairing_file_dir.join(format!("{}.json", udid));
     fs::write(
-        peer_info_output,
+        &peer_info_output,
         serde_json::to_string_pretty(&peer_info_json)?,
-    )?;
+    )
+    .map_err(|e| {
+        anyhow::anyhow!(
+            "failed to write peer info '{}': {}",
+            peer_info_output.display(),
+            e
+        )
+    })?;
 
     log::info!(
         "SUCCESS: Remote pairing file saved to '{}'",
