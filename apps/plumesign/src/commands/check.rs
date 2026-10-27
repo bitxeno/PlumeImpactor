@@ -10,8 +10,9 @@ use std::fs;
 
 use crate::get_data_path;
 use idevice::afc::AfcClient;
+use idevice::remote_pairing::errors::RemotePairingError;
 use idevice::usbmuxd::{UsbmuxdAddr, UsbmuxdConnection};
-use idevice::{IdeviceService, RsdService};
+use idevice::{IdeviceError, IdeviceService, RsdService};
 
 use crate::commands::device::select_device;
 use plume_utils::Device;
@@ -325,6 +326,22 @@ async fn config() -> Result<()> {
     Ok(())
 }
 
+/// pair_verify_hint turns the "Pair verify failed" error into an actionable
+/// message. The device no longer accepts the stored pairing record (for
+/// example after it was removed in "Remote App and Devices"), so only pairing
+/// the device again fixes it.
+fn pair_verify_hint(err: IdeviceError) -> anyhow::Error {
+    if matches!(
+        &err,
+        IdeviceError::RemotePairing(RemotePairingError::PairVerifyFailed)
+    ) {
+        return anyhow::anyhow!(
+            "Pair verify failed: the device no longer accepts the stored pairing, pair the device again"
+        );
+    }
+    err.into()
+}
+
 async fn afc(args: AfcArgs) -> Result<()> {
     if let (Some(ip), Some(port)) = (args.ip.as_deref(), args.port) {
         let pairing_file = if let Some(pairing_file) = args.pairing_file.as_deref() {
@@ -354,8 +371,8 @@ async fn afc(args: AfcArgs) -> Result<()> {
         let conn = RpPairingSocket::new(conn);
         let mut rpc = RemotePairingClient::new(conn, &host, &mut rpf);
 
-        rpc.attempt_pair_verify().await?;
-        rpc.validate_pairing().await?;
+        rpc.attempt_pair_verify().await.map_err(pair_verify_hint)?;
+        rpc.validate_pairing().await.map_err(pair_verify_hint)?;
 
         println!("SUCCESS: AFC access OK (RSD)");
         return Ok(());
@@ -390,4 +407,28 @@ async fn afc(args: AfcArgs) -> Result<()> {
 
     println!("SUCCESS: AFC access OK");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pair_verify_failure_suggests_pairing_again() {
+        let err = pair_verify_hint(IdeviceError::RemotePairing(
+            RemotePairingError::PairVerifyFailed,
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Pair verify failed: the device no longer accepts the stored pairing, pair the device again"
+        );
+    }
+
+    #[test]
+    fn other_errors_keep_their_message() {
+        let err = pair_verify_hint(IdeviceError::RemotePairing(
+            RemotePairingError::SrpAuthFailed,
+        ));
+        assert_eq!(err.to_string(), "SRP auth failed");
+    }
 }
