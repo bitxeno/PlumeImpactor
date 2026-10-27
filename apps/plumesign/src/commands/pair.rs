@@ -1,6 +1,8 @@
 use crate::get_data_path;
 use anyhow::Result;
 use clap::Args;
+use idevice::IdeviceError;
+use idevice::remote_pairing::errors::RemotePairingError;
 use idevice::remote_pairing::{RemotePairingClient, RpPairingFile, RpPairingSocket};
 use log::debug;
 use serde_json::json;
@@ -56,24 +58,29 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         let conn = RpPairingSocket::new(conn);
         let mut rpc = RemotePairingClient::new(conn, &host, &mut pairing_file);
 
-        // try pairing, will fail with invalid pin
+        // pair-verify runs first; a new host falls through to pair-setup and
+        // prompts for the PIN shown on the device.
         rpc.connect(
             async |_| {
                 let mut buf = String::new();
                 print!("Enter PIN:");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin()
-                    .read_line(&mut buf)
-                    .expect("Failed to read line");
+                if let Err(e) = std::io::stdout().flush() {
+                    log::warn!("failed to flush stdout: {e}");
+                }
+                if let Err(e) = std::io::stdin().read_line(&mut buf) {
+                    log::error!("failed to read PIN: {e}");
+                    return String::new();
+                }
                 buf.trim_end().to_string()
             },
             0u8,
         )
         .await
-        .expect("Invalid PIN");
+        .map_err(pair_error)?;
 
-        let peer_device: &idevice::remote_pairing::PeerDevice =
-            rpc.paired_peer_device().expect("Failed to get peer device");
+        let peer_device: &idevice::remote_pairing::PeerDevice = rpc
+            .paired_peer_device()
+            .map_err(|e| anyhow::anyhow!("failed to get paired device info: {e}"))?;
         let udid = peer_device.remotepairing_udid.clone();
         // Both fields are optional: `remotepairing_ip` records the IP used for
         // pairing, and `manual` records whether that IP was specified by the
@@ -128,4 +135,24 @@ pub async fn execute(args: PairArgs) -> Result<()> {
         output_path.display()
     );
     Ok(())
+}
+
+fn pair_error(err: IdeviceError) -> anyhow::Error {
+    match &err {
+        IdeviceError::RemotePairing(RemotePairingError::PairingRejected(reason)) => {
+            anyhow::anyhow!("device rejected pairing: {reason}")
+        }
+        IdeviceError::RemotePairing(RemotePairingError::PairVerifyFailed) => {
+            anyhow::anyhow!("pair verification failed")
+        }
+        IdeviceError::RemotePairing(RemotePairingError::SrpAuthFailed) => {
+            anyhow::anyhow!("wrong PIN")
+        }
+        IdeviceError::UnexpectedResponse(msg)
+            if msg.contains("error response during pair consent") =>
+        {
+            anyhow::anyhow!("device rejected pairing; it may be in pairing backoff, wait and retry")
+        }
+        _ => anyhow::anyhow!("pairing failed: {err}"),
+    }
 }
