@@ -151,8 +151,27 @@ async fn reset(args: ResetArgs) -> Result<()> {
     Ok(())
 }
 
+fn removal_email(username: &str, accounts: &AccountStore) -> Result<String> {
+    let email = username.trim();
+    if email.is_empty() || !email.contains('@') {
+        anyhow::bail!("Provide the account email used to create its Anisette data.");
+    }
+
+    // Use the canonical email from accounts.json when available. Anisette
+    // data can also belong to an account that has never been saved/logged in,
+    // so the supplied email itself is a valid directory key fallback.
+    Ok(accounts
+        .accounts()
+        .values()
+        .find(|account| account.email().trim().eq_ignore_ascii_case(email))
+        .map(|account| account.email().clone())
+        .unwrap_or_else(|| email.to_owned()))
+}
+
 async fn remove(args: RemoveArgs) -> Result<()> {
-    let email = account_email(&args.username).await?;
+    let settings_path = crate::commands::account::get_settings_path();
+    let settings = AccountStore::load(&Some(settings_path)).await?;
+    let email = removal_email(&args.username, &settings)?;
     plume_store::anisette_paths::remove_account_state(&get_data_path(), &email)?;
 
     log::info!("Anisette data removed for {}.", mask_email(&email));
@@ -351,6 +370,23 @@ mod tests {
         fs::create_dir_all(empty_dir).unwrap();
 
         assert!(anisette_accounts(&root, &store).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_accepts_account_not_saved_in_accounts_json() {
+        let root = temp_dir();
+        let store = account_store(&root);
+        let email = "never-logged-in@example.com";
+        let account_state = root
+            .join(plume_store::anisette_paths::ANISETTE_DIR)
+            .join(plume_core::account_dir_name(email));
+        fs::create_dir_all(&account_state).unwrap();
+        fs::write(account_state.join("state.plist"), b"anisette data").unwrap();
+
+        assert_eq!(removal_email(email, &store).unwrap(), email);
+        plume_store::anisette_paths::remove_account_state(&root, email).unwrap();
+        assert!(!account_state.exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
