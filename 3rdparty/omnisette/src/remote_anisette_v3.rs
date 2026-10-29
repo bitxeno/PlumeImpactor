@@ -114,6 +114,10 @@ pub struct AnisetteState {
     client_info: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
+    /// Email address associated with this per-account state.  Missing in older
+    /// state files, which remain readable as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
 }
 
 impl Default for AnisetteState {
@@ -123,6 +127,7 @@ impl Default for AnisetteState {
             adi_pb: None,
             client_info: None,
             user_agent: None,
+            email: None,
         }
     }
 }
@@ -156,6 +161,11 @@ impl AnisetteState {
     pub fn set_identity(&mut self, client_info: String, user_agent: String) {
         self.client_info = Some(client_info);
         self.user_agent = Some(user_agent);
+    }
+
+    /// Associate this state with an account email.
+    pub fn set_email(&mut self, email: String) {
+        self.email = Some(email);
     }
 
     /// True for states written by versions that did not track identity.
@@ -704,6 +714,8 @@ pub struct RemoteAnisetteProviderV3 {
     account_scoped: bool,
     /// Server able to consume a pre-ADIB `adi_pb`.
     legacy_server_url: Option<String>,
+    /// Email for the account-scoped state file, if available.
+    account_email: Option<String>,
 }
 
 impl RemoteAnisetteProviderV3 {
@@ -723,6 +735,26 @@ impl RemoteAnisetteProviderV3 {
         legacy_root: Option<PathBuf>,
         legacy_server_url: Option<String>,
     ) -> RemoteAnisetteProviderV3 {
+        Self::with_account_email(
+            url,
+            configuration_path,
+            serial,
+            login_mode,
+            legacy_root,
+            legacy_server_url,
+            None,
+        )
+    }
+
+    pub fn with_account_email(
+        url: String,
+        configuration_path: PathBuf,
+        serial: String,
+        login_mode: bool,
+        legacy_root: Option<PathBuf>,
+        legacy_server_url: Option<String>,
+        account_email: Option<String>,
+    ) -> RemoteAnisetteProviderV3 {
         let account_scoped = configuration_path_is_account_dir(&configuration_path);
         RemoteAnisetteProviderV3 {
             client_url: url,
@@ -736,6 +768,7 @@ impl RemoteAnisetteProviderV3 {
             account_scoped,
             legacy_root,
             legacy_server_url,
+            account_email,
         }
     }
 
@@ -874,14 +907,19 @@ impl RemoteAnisetteProviderV3 {
         client.get_headers(state).await
     }
 
-    fn persist_state(&self) -> Result<(), AnisetteError> {
+    fn persist_state(&mut self) -> Result<(), AnisetteError> {
         if !self.account_scoped {
             // Legacy shared location: read only, so older versions and
             // accounts that have not logged in again keep working.
             return Ok(());
         }
         fs::create_dir_all(&self.configuration_path)?;
-        if let Some(state) = &self.state {
+        if let Some(state) = &mut self.state {
+            if let Some(email) = &self.account_email {
+                // The selected account is authoritative: update stale or
+                // missing email metadata when an old state is reused.
+                state.email = Some(email.clone());
+            }
             plist::to_file_xml(self.configuration_path.join("state.plist"), state)?;
         }
         Ok(())
@@ -896,10 +934,22 @@ impl RemoteAnisetteProviderV3 {
 /// it) also stops the loader from falling back to the legacy shared state,
 /// which would otherwise resurrect the old identity.
 pub fn reset_state_file(path: &PathBuf) -> Result<(), AnisetteError> {
+    reset_state_file_with_email(path, None)
+}
+
+/// Reset an account's state while preserving its email in the new plist.
+pub fn reset_state_file_for_account(path: &PathBuf, email: &str) -> Result<(), AnisetteError> {
+    reset_state_file_with_email(path, Some(email))
+}
+
+fn reset_state_file_with_email(path: &PathBuf, email: Option<&str>) -> Result<(), AnisetteError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let state = AnisetteState::new();
+    let mut state = AnisetteState::new();
+    if let Some(email) = email {
+        state.set_email(email.to_owned());
+    }
     plist::to_file_xml(path, &state)?;
     Ok(())
 }
@@ -918,6 +968,7 @@ mod tests {
     use crate::remote_anisette_v3::RemoteAnisetteProviderV3;
     use crate::{AnisetteError, DEFAULT_ANISETTE_URL_V3};
     use log::info;
+    use uuid::Uuid;
 
     #[test]
     fn server_url_is_normalized() {
@@ -962,6 +1013,64 @@ mod tests {
         assert!(state.has_recorded_identity());
         assert_eq!(state.identity().0, "<PC> <Windows;6.2(0,0);9200> <x>");
         assert_eq!(state.identity().1, "ua");
+    }
+
+    #[test]
+    fn old_state_without_email_remains_readable() {
+        let mut state = super::AnisetteState::new();
+        state.set_identity("client".into(), "agent".into());
+        let mut plist = plist::to_value(&state).unwrap();
+        plist.as_dictionary_mut().unwrap().remove("email");
+
+        let old_state: super::AnisetteState = plist::from_value(&plist).unwrap();
+        assert_eq!(old_state.email, None);
+        assert_eq!(old_state.identity(), ("client", "agent"));
+    }
+
+    #[test]
+    fn state_email_round_trips_through_plist() {
+        let mut state = super::AnisetteState::new();
+        state.set_email("user@example.com".into());
+
+        let plist = plist::to_value(&state).unwrap();
+        let restored: super::AnisetteState = plist::from_value(&plist).unwrap();
+        assert_eq!(restored.email.as_deref(), Some("user@example.com"));
+    }
+
+    #[test]
+    fn account_state_persistence_records_email() -> Result<(), AnisetteError> {
+        let dir = std::env::temp_dir().join(format!("omnisette-{}", Uuid::new_v4()));
+        let account_dir = dir.join("anisette").join("account-hash");
+        let email = "user@example.com".to_string();
+        let mut provider = RemoteAnisetteProviderV3::with_account_email(
+            DEFAULT_ANISETTE_URL_V3.to_string(),
+            account_dir.clone(),
+            "0".into(),
+            false,
+            Some(dir.clone()),
+            None,
+            Some(email.clone()),
+        );
+        provider.state = Some(super::AnisetteState::new());
+        provider.persist_state()?;
+
+        let saved: super::AnisetteState = plist::from_file(account_dir.join("state.plist"))?;
+        assert_eq!(saved.email.as_deref(), Some(email.as_str()));
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn resetting_account_state_preserves_email() -> Result<(), AnisetteError> {
+        let dir = std::env::temp_dir().join(format!("omnisette-{}", Uuid::new_v4()));
+        let path = dir.join("state.plist");
+        let email = "reset@example.com";
+
+        super::reset_state_file_for_account(&path, email)?;
+        let state: super::AnisetteState = plist::from_file(&path)?;
+        assert_eq!(state.email.as_deref(), Some(email));
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
     }
 
     #[tokio::test]

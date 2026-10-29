@@ -255,7 +255,7 @@ impl AnisetteHeaders {
 
         #[cfg(feature = "remote-anisette-v3")]
         return Ok(AnisetteHeadersProviderRes::remote(Box::new(
-            remote_anisette_v3::RemoteAnisetteProviderV3::with_mode(
+            remote_anisette_v3::RemoteAnisetteProviderV3::with_account_email(
                 configuration.anisette_url_v3.clone(),
                 configuration.state_dir(),
                 configuration.macos_serial.clone(),
@@ -266,6 +266,7 @@ impl AnisetteHeaders {
                     .account_id()
                     .map(|_| configuration.configuration_path().clone()),
                 configuration.legacy_server_url_v3().cloned(),
+                configuration.account_id().map(str::to_owned),
             ),
         )));
 

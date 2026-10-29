@@ -35,7 +35,7 @@ pub fn account_state_file(data_root: &Path, email: &str) -> PathBuf {
 /// to the legacy shared state and resurrect the old identity.
 pub fn reset_account_state(data_root: &Path, email: &str) -> std::io::Result<()> {
     let path = account_state_file(data_root, email);
-    plume_core::reset_state_file(&path).map_err(std::io::Error::other)
+    plume_core::reset_state_file_for_account(&path, email).map_err(std::io::Error::other)
 }
 
 #[cfg(test)]
