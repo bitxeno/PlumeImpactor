@@ -23,6 +23,8 @@ pub enum AnisetteCommands {
     Server(ServerArgs),
     /// Reset an account's anisette data (new device identity, requires re-login)
     Reset(ResetArgs),
+    /// Remove an account's anisette data directory
+    Remove(RemoveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -43,6 +45,13 @@ pub struct ResetArgs {
     pub username: String,
 }
 
+#[derive(Debug, Args)]
+pub struct RemoveArgs {
+    /// Email of the account whose anisette data should be removed
+    #[arg(short = 'u', long = "username", value_name = "EMAIL", required = true)]
+    pub username: String,
+}
+
 /// Build the anisette configuration used by every command.
 ///
 /// `login` marks the flow as a login, which lets a legacy state adopt the
@@ -59,6 +68,7 @@ pub async fn execute(args: AnisetteArgs) -> Result<()> {
     match args.command {
         AnisetteCommands::Server(server_args) => server(server_args).await,
         AnisetteCommands::Reset(reset_args) => reset(reset_args).await,
+        AnisetteCommands::Remove(remove_args) => remove(remove_args).await,
     }
 }
 
@@ -91,7 +101,10 @@ async fn server(args: ServerArgs) -> Result<()> {
         plume_store::anisette_paths::server::url_with_source(&data_root);
     log::info!("Anisette server: {effective} (source: {effective_source})");
 
-    if matches!(effective_source, plume_store::anisette_paths::server::Source::Env) {
+    if matches!(
+        effective_source,
+        plume_store::anisette_paths::server::Source::Env
+    ) {
         log::info!(
             "{} is set, so it takes precedence over the stored setting.",
             plume_store::anisette_paths::server::ENV_OVERRIDE
@@ -101,21 +114,24 @@ async fn server(args: ServerArgs) -> Result<()> {
     Ok(())
 }
 
-async fn reset(args: ResetArgs) -> Result<()> {
+async fn account_email(username: &str) -> Result<String> {
     let settings_path = crate::commands::account::get_settings_path();
     let settings = plume_store::AccountStore::load(&Some(settings_path)).await?;
 
-    let email = settings
-        .get_account(&args.username)
+    Ok(settings
+        .get_account(username)
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Account '{}' not found. Use 'plumesign account list' to see available accounts.",
-                args.username
+                username
             )
         })?
         .email()
-        .clone();
+        .clone())
+}
 
+async fn reset(args: ResetArgs) -> Result<()> {
+    let email = account_email(&args.username).await?;
     plume_store::anisette_paths::reset_account_state(&get_data_path(), &email)?;
 
     log::info!(
@@ -124,5 +140,13 @@ async fn reset(args: ResetArgs) -> Result<()> {
         mask_email(&email)
     );
 
+    Ok(())
+}
+
+async fn remove(args: RemoveArgs) -> Result<()> {
+    let email = account_email(&args.username).await?;
+    plume_store::anisette_paths::remove_account_state(&get_data_path(), &email)?;
+
+    log::info!("Anisette data removed for {}.", mask_email(&email));
     Ok(())
 }

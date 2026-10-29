@@ -38,6 +38,16 @@ pub fn reset_account_state(data_root: &Path, email: &str) -> std::io::Result<()>
     plume_core::reset_state_file_for_account(&path, email).map_err(std::io::Error::other)
 }
 
+/// Remove only the selected account's anisette state directory.
+///
+/// Shared legacy state at the data root is intentionally left untouched.
+pub fn remove_account_state(data_root: &Path, email: &str) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(account_dir(data_root, email)) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,6 +74,33 @@ mod tests {
         let a = account_dir(Path::new("/data"), "a@example.com");
         let b = account_dir(Path::new("/data"), "b@example.com");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn remove_account_state_keeps_legacy_data() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data_root = std::env::temp_dir().join(format!(
+            "plume-anisette-remove-{}-{unique}",
+            std::process::id()
+        ));
+        let email = "remove@example.com";
+        let account_state = account_dir(&data_root, email);
+        std::fs::create_dir_all(&account_state).unwrap();
+        std::fs::write(account_state.join("state.plist"), b"account state").unwrap();
+        std::fs::write(data_root.join("state.plist"), b"legacy state").unwrap();
+
+        remove_account_state(&data_root, email).unwrap();
+
+        assert!(!account_state.exists());
+        assert_eq!(
+            std::fs::read(data_root.join("state.plist")).unwrap(),
+            b"legacy state"
+        );
+        remove_account_state(&data_root, email).unwrap();
+        std::fs::remove_dir_all(data_root).unwrap();
     }
 }
 
