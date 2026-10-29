@@ -211,6 +211,16 @@ macro_rules! get_plist_string {
     }};
 }
 
+impl Bundle {
+    pub(crate) fn get_display_name(&self) -> Option<String> {
+        get_plist_string!(self, "CFBundleDisplayName")
+    }
+
+    pub(crate) fn set_display_name(&self, new_name: &str) -> Result<(), Error> {
+        self.set_info_plist_key("CFBundleDisplayName", new_name)
+    }
+}
+
 impl PlistInfoTrait for Bundle {
     fn get_name(&self) -> Option<String> {
         get_plist_string!(self, "CFBundleDisplayName")
