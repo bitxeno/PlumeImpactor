@@ -71,13 +71,26 @@ impl Account {
         let status = req.status().as_u16();
         let mut new_state = req.json::<AuthenticationExtras>().await?;
         if status == 201 {
-            new_state.new_state = Some(LoginState::NeedsSMS2FAVerification(VerifyBody {
-                phone_number: PhoneNumber {
-                    id: new_state.trusted_phone_numbers.first().unwrap().id,
-                },
-                mode: "sms".to_string(),
-                security_code: None,
-            }));
+            // Apple has already sent an SMS code to the first trusted number as a
+            // side effect of this GET. Requesting delivery again would send a
+            // second code and invalidate the first, so signal the caller (via
+            // `new_state`) to skip the explicit `PUT /auth/verify/phone` and go
+            // straight to code entry.
+            if let Some(first) = new_state.trusted_phone_numbers.first() {
+                log::info!(
+                    "GET /auth returned 201: an SMS code was already sent to the trusted number ending in {}",
+                    first.last_two_digits
+                );
+                new_state.new_state = Some(LoginState::NeedsSMS2FAVerification(VerifyBody {
+                    phone_number: PhoneNumber { id: first.id },
+                    mode: "sms".to_string(),
+                    security_code: None,
+                }));
+            } else {
+                log::warn!("GET /auth returned 201 but no trusted phone numbers were returned");
+            }
+        } else {
+            log::debug!("GET /auth returned status {}", status);
         }
 
         Ok(new_state)

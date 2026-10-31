@@ -106,13 +106,26 @@ impl Account {
                     }
                 }
                 LoginState::NeedsSMS2FA => {
+                    // Fetching the phone list is a GET /auth, which itself sends an
+                    // SMS (status 201). If that happened we must not PUT again: a
+                    // second code would invalidate the first, producing the
+                    // "two SMS but neither works" behaviour.
+                    let mut already_sent = None;
                     if trusted_phone_numbers.is_empty() {
                         if let Ok(extras) = _self.get_auth_extras().await {
                             trusted_phone_numbers = extras.trusted_phone_numbers;
+                            already_sent = extras.new_state;
                         }
                     }
-                    let id = trusted_phone_numbers.first().map(|p| p.id).unwrap_or(1);
-                    response = _self.send_sms_2fa_to_devices(id).await?;
+                    if let Some(LoginState::NeedsSMS2FAVerification(body)) = already_sent {
+                        log::info!(
+                            "SMS 2FA code already sent while fetching phone numbers; awaiting code"
+                        );
+                        response = LoginState::NeedsSMS2FAVerification(body);
+                    } else {
+                        let id = trusted_phone_numbers.first().map(|p| p.id).unwrap_or(1);
+                        response = _self.send_sms_2fa_to_devices(id).await?;
+                    }
                 }
                 LoginState::NeedsSMS2FAVerification(body) => {
                     let request = TwoFactorRequest {
