@@ -54,8 +54,9 @@ pub struct ResetArgs {
 
 #[derive(Debug, Args)]
 pub struct RemoveArgs {
-    /// Email of the account whose anisette data should be removed
-    #[arg(short = 'u', long = "username", value_name = "EMAIL", required = true)]
+    /// Account email, or the directory name shown by `anisette list` when
+    /// the state has no recoverable email
+    #[arg(short = 'u', long = "username", value_name = "EMAIL|DIR", required = true)]
     pub username: String,
 }
 
@@ -151,30 +152,59 @@ async fn reset(args: ResetArgs) -> Result<()> {
     Ok(())
 }
 
-fn removal_email(username: &str, accounts: &AccountStore) -> Result<String> {
-    let email = username.trim();
-    if email.is_empty() || !email.contains('@') {
+/// Resolve the `-u` value to the directory name of the anisette state to
+/// delete.
+///
+/// Accepts the account email, or the hashed directory name as displayed by
+/// `anisette list` for states whose email is unrecoverable.  A hash that
+/// matches no known account is kept as-is so orphaned directories created by
+/// failed logins can still be removed.
+fn removal_key(
+    data_root: &Path,
+    username: &str,
+    accounts: &AccountStore,
+) -> Result<String> {
+    let key = username.trim();
+    if key.is_empty() {
         anyhow::bail!("Provide the account email used to create its Anisette data.");
     }
 
-    // Use the canonical email from accounts.json when available. Anisette
-    // data can also belong to an account that has never been saved/logged in,
-    // so the supplied email itself is a valid directory key fallback.
-    Ok(accounts
-        .accounts()
-        .values()
-        .find(|account| account.email().trim().eq_ignore_ascii_case(email))
-        .map(|account| account.email().clone())
-        .unwrap_or_else(|| email.to_owned()))
+    if key.contains('@') {
+        // Use the canonical email from accounts.json when available. Anisette
+        // data can also belong to an account that has never been saved/logged
+        // in, so the supplied email itself is a valid directory key fallback.
+        let email = accounts
+            .accounts()
+            .values()
+            .find(|account| account.email().trim().eq_ignore_ascii_case(key))
+            .map(|account| account.email().clone())
+            .unwrap_or_else(|| key.to_owned());
+        return Ok(plume_core::account_dir_name(&email));
+    }
+
+    // Not an email: treat it as the directory name shown by `anisette list`.
+    // Verify the caller passed a real directory so a typo cannot silently
+    // report success after deleting nothing.
+    let directory = data_root
+        .join(plume_store::anisette_paths::ANISETTE_DIR)
+        .join(key);
+    if !directory.join("state.plist").is_file() {
+        anyhow::bail!(
+            "No Anisette data found for '{}'. Use 'plumesign anisette list' to see the exact directory names.",
+            key
+        );
+    }
+    Ok(key.to_string())
 }
 
 async fn remove(args: RemoveArgs) -> Result<()> {
+    let data_root = get_data_path();
     let settings_path = crate::commands::account::get_settings_path();
     let settings = AccountStore::load(&Some(settings_path)).await?;
-    let email = removal_email(&args.username, &settings)?;
-    plume_store::anisette_paths::remove_account_state(&get_data_path(), &email)?;
+    let key = removal_key(&data_root, &args.username, &settings)?;
+    plume_store::anisette_paths::remove_account_dir(&data_root, &key)?;
 
-    log::info!("Anisette data removed for {}.", mask_email(&email));
+    log::info!("Anisette data removed for {}.", mask_email(&key));
     Ok(())
 }
 
@@ -374,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_accepts_account_not_saved_in_accounts_json() {
+    fn remove_accepts_email_of_account_not_saved_in_accounts_json() {
         let root = temp_dir();
         let store = account_store(&root);
         let email = "never-logged-in@example.com";
@@ -384,9 +414,49 @@ mod tests {
         fs::create_dir_all(&account_state).unwrap();
         fs::write(account_state.join("state.plist"), b"anisette data").unwrap();
 
-        assert_eq!(removal_email(email, &store).unwrap(), email);
-        plume_store::anisette_paths::remove_account_state(&root, email).unwrap();
+        let key = removal_key(&root, email, &store).unwrap();
+        assert_eq!(key, plume_core::account_dir_name(email));
+        plume_store::anisette_paths::remove_account_dir(&root, &key).unwrap();
         assert!(!account_state.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_accepts_directory_name_of_orphaned_state() {
+        let root = temp_dir();
+        let store = account_store(&root);
+        // A failed login can leave state behind for an account that never
+        // made it into accounts.json, so only the hashed directory is known.
+        let directory = "deadbeefdeadbeefdeadbeefdeadbeef";
+        let account_state = root
+            .join(plume_store::anisette_paths::ANISETTE_DIR)
+            .join(directory);
+        fs::create_dir_all(&account_state).unwrap();
+        fs::write(account_state.join("state.plist"), b"orphan state").unwrap();
+
+        let key = removal_key(&root, directory, &store).unwrap();
+        assert_eq!(key, directory);
+        plume_store::anisette_paths::remove_account_dir(&root, &key).unwrap();
+        assert!(!account_state.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_rejects_unknown_non_email_key() {
+        let root = temp_dir();
+        let store = account_store(&root);
+
+        assert!(removal_key(&root, "no-such-directory", &store).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_maps_known_email_to_its_directory() {
+        let root = temp_dir();
+        let store = account_store(&root);
+
+        let key = removal_key(&root, "Old@Example.com", &store).unwrap();
+        assert_eq!(key, plume_core::account_dir_name("old@example.com"));
         fs::remove_dir_all(root).unwrap();
     }
 }

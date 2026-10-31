@@ -42,10 +42,21 @@ pub fn reset_account_state(data_root: &Path, email: &str) -> std::io::Result<()>
 ///
 /// Shared legacy state at the data root is intentionally left untouched.
 pub fn remove_account_state(data_root: &Path, email: &str) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(account_dir(data_root, email)) {
+    remove_account_dir(data_root, &plume_core::account_dir_name(email))
+}
+
+/// Remove the anisette state directory identified by its hashed directory
+/// name, as listed by `anisette list`.  This also covers orphaned states
+/// whose email is no longer recoverable.
+pub fn remove_account_dir(data_root: &Path, directory_name: &str) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(account_dir_by_name(data_root, directory_name)) {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         result => result,
     }
+}
+
+fn account_dir_by_name(data_root: &Path, directory_name: &str) -> PathBuf {
+    data_root.join(ANISETTE_DIR).join(directory_name)
 }
 
 #[cfg(test)]
