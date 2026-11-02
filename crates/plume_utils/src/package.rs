@@ -7,6 +7,11 @@ use uuid::Uuid;
 use zip::ZipArchive;
 use zip::write::FileOptions;
 
+/// Entries at or above this size must be written with the ZIP64 "large file"
+/// option. The margin below the 4 GiB limit covers deflate's worst-case
+/// expansion for incompressible data.
+const ZIP64_FILE_THRESHOLD: u64 = zip::ZIP64_BYTES_THR - (1 << 20);
+
 #[derive(Debug, Clone)]
 pub struct Package {
     package_file: PathBuf,
@@ -249,7 +254,12 @@ impl Package {
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or(&relative_name);
-                    zip.start_file(&name, options.clone())?;
+                    let file_options = if fs::metadata(&entry_path)?.len() >= ZIP64_FILE_THRESHOLD {
+                        options.clone().large_file(true)
+                    } else {
+                        options.clone()
+                    };
+                    zip.start_file(&name, file_options)?;
                     let mut f = fs::File::open(&entry_path)?;
                     std::io::copy(&mut f, zip)?;
                     progress_callback(file_name);
@@ -308,7 +318,12 @@ impl Package {
                     .replace('\\', "/");
 
                 if entry_path.is_file() {
-                    zip.start_file(&name, options.clone())?;
+                    let file_options = if fs::metadata(&entry_path)?.len() >= ZIP64_FILE_THRESHOLD {
+                        options.clone().large_file(true)
+                    } else {
+                        options.clone()
+                    };
+                    zip.start_file(&name, file_options)?;
                     let mut f = fs::File::open(&entry_path)?;
                     std::io::copy(&mut f, zip)?;
                 } else if entry_path.is_dir() {
