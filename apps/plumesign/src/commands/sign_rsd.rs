@@ -45,6 +45,9 @@ pub struct SignArgs {
     /// Custom bundle version to set
     #[arg(long = "custom-version", value_name = "VERSION")]
     pub version: Option<String>,
+    /// Custom app icon to set (image file, e.g. png/jpg)
+    #[arg(long = "custom-icon", alias = "icon", value_name = "ICON")]
+    pub icon: Option<PathBuf>,
     /// Perform ad-hoc signing (no certificate required)
     #[arg(long, short, num_args = 1..)]
     pub tweaks: Option<Vec<PathBuf>>,
@@ -161,6 +164,7 @@ pub async fn execute(args: SignArgs) -> Result<()> {
         custom_identifier: args.bundle_identifier,
         custom_name: args.name,
         custom_version: args.version,
+        custom_icon: args.icon,
         tweaks: args.tweaks,
         shallow: args.shallow,
         ..Default::default()
