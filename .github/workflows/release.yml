@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
 env:
   BINARY_NAME: plumesign
+  # `debug = "full"` in Cargo.toml costs ~40s per arch in link time and emits a
+  # ~140MB dSYM that never ships (the binary is built with `strip = "symbols"`).
+  # Skip generating debug info in CI; local builds keep the full profile.
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
 
 jobs:
   build-linux:
