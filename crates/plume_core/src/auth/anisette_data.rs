@@ -155,17 +155,18 @@ impl AnisetteData {
         plist
     }
 
+    /// Look up a generated header by name, case-insensitively.
+    ///
+    /// Only the *name* is folded: values must be returned verbatim.  Apple
+    /// validates `X-Mme-Client-Info` byte for byte, and its OS segment is
+    /// case sensitive (`<Mac OS X;10.12.6;16G29>`), so a lowercased value
+    /// makes GrandSlam answer 403 before SRP even starts.
     pub fn get_header(&self, header: &str) -> Result<String, Error> {
-        let headers = self
-            .generate_headers(true, true, true)
-            .iter()
-            .map(|(k, v)| (k.to_lowercase(), v.to_lowercase()))
-            .collect::<HashMap<String, String>>();
-
-        match headers.get(&header.to_lowercase()) {
-            Some(v) => Ok(v.to_string()),
-            None => Err(Error::DeveloperSessionRequestFailed),
-        }
+        self.generate_headers(true, true, true)
+            .into_iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(header))
+            .map(|(_, v)| v)
+            .ok_or(Error::DeveloperSessionRequestFailed)
     }
 }
 
@@ -208,5 +209,25 @@ mod tests {
             headers.get("X-Mme-Client-Info").unwrap(),
             "<Pixel 7> <Android;14;UQ1A.240205.002> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
         );
+    }
+
+    /// Apple rejects a lowercased `X-Mme-Client-Info` with 403, so the lookup
+    /// must be case-insensitive on the name only and preserve the value.
+    #[test]
+    fn header_lookup_preserves_value_case() {
+        let data = data_with_client_info(
+            "<MacBookPro13,3> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>",
+        );
+
+        assert_eq!(
+            data.get_header("x-mme-client-info").unwrap(),
+            "<MacBookPro13,3> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+        );
+        // Lookup by name stays case-insensitive.
+        assert_eq!(
+            data.get_header("X-MME-CLIENT-INFO").unwrap(),
+            data.get_header("x-mme-client-info").unwrap()
+        );
+        assert_eq!(data.get_header("loc").unwrap(), "en_GB");
     }
 }
