@@ -14,6 +14,15 @@ use crate::auth::{
     TwoFactorRequest,
 };
 
+/// Password hashing protocols advertised to GrandSlam in `ps`.  The server
+/// answers with the one it wants in `sp`.
+///
+/// * `s2k` – the SRP password is the raw SHA-256 digest of the password.
+/// * `s2k_fo` – the SRP password is the lowercase hex *string* of that digest,
+///   which Apple uses to be robust against clients that mangle binary data.
+const S2K: &str = "s2k";
+const S2K_FO: &str = "s2k_fo";
+
 #[macro_export]
 macro_rules! plist_get_string {
     ($base:expr, $( $path:literal )+, $final_key:literal) => {{
@@ -41,6 +50,24 @@ macro_rules! plist_get_string {
             .expect(concat!("Value is not a string: ", $key))
             .to_string()
     }};
+}
+
+/// Turns the plaintext password into the byte string that PBKDF2 is fed, based
+/// on the protocol GrandSlam selected.
+///
+/// `s2k` feeds the raw SHA-256 digest; `s2k_fo` feeds the hex-encoded digest as
+/// ASCII (Apple's "for other" variant, which survives transports that cannot
+/// carry arbitrary bytes).
+fn password_hash_for_protocol(protocol: &str, password: &str) -> Result<Vec<u8>, Error> {
+    let digest = Sha256::digest(password.as_bytes());
+    match protocol {
+        S2K => Ok(digest.to_vec()),
+        S2K_FO => Ok(hex::encode(digest).into_bytes()),
+        other => Err(Error::AuthSrpWithMessage(
+            0,
+            format!("Unsupported password protocol selected by server: {other}"),
+        )),
+    }
 }
 
 impl Account {
@@ -192,7 +219,7 @@ impl Account {
             a_pub: plist::Value::Data(a_pub),
             cpd: anisette.to_plist(true, false, false),
             operation: "init".to_string(),
-            ps: vec!["s2k".to_string(), "s2k_fo".to_string()],
+            ps: vec![S2K.to_string(), S2K_FO.to_string()],
             username: username_for_spd.clone(),
         };
 
@@ -220,11 +247,23 @@ impl Account {
         let iters = res.get("i").unwrap().as_signed_integer().unwrap();
         let c = res.get("c").unwrap().as_string().unwrap();
 
-        let hashed_password = Sha256::digest(password.as_bytes());
+        // Apple picks the hashing scheme out of the `ps` list we advertised and
+        // echoes it back as `sp`.  Older/other endpoints may omit it, in which
+        // case the historical `s2k` behaviour is kept.
+        let protocol = match res.get("sp").and_then(|v| v.as_string()) {
+            Some(sp) => sp.to_string(),
+            None => {
+                log::warn!("GSA response did not select a password protocol; assuming {S2K}");
+                S2K.to_string()
+            }
+        };
+        log::debug!("GSA selected password protocol {protocol} with {iters} PBKDF2 iterations");
+
+        let password_hash = password_hash_for_protocol(&protocol, password)?;
 
         let mut password_buf = [0u8; 32];
         pbkdf2::pbkdf2::<hmac::Hmac<Sha256>>(
-            &hashed_password,
+            &password_hash,
             salt,
             iters as u32,
             &mut password_buf,
